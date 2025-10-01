@@ -18,7 +18,7 @@ from homeassistant.const import STATE_ON
 
 from .const import LOGGER_NAME
 from .coordinator import ProportionalLightCoordinator
-from .utils import filter_valid_states, get_on_states, add_color_attributes
+from .utils import filter_valid_states, get_on_states, add_color_attributes, calculate_proportional_brightness
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
@@ -175,10 +175,23 @@ class ProportionalLight(LightEntity):
         if service_calls:
             await asyncio.gather(*service_calls)
     
-    async def _apply_to_on_lights(self, on_states, brightness: int, **kwargs) -> None:
-        """Apply settings to currently ON lights with the same brightness."""
+    async def _apply_to_on_lights(self, on_states, target_brightness: int, **kwargs) -> None:
+        """Apply settings to currently ON lights with proportional brightness scaling."""
+        # Calculate proportional brightness for each light using stored proportions
+        proportional_brightnesses, updated_proportions = calculate_proportional_brightness(
+            on_states, target_brightness, self.coordinator.brightness_proportions
+        )
+        
+        # Update coordinator with new proportions (for when we're setting the brightness)
+        self.coordinator._brightness_proportions.update(updated_proportions)
+        
+        _LOGGER.debug(f"Applying proportional brightness: target_avg={target_brightness}")
+        for entity_id, brightness in proportional_brightnesses.items():
+            _LOGGER.debug(f"  {entity_id}: {brightness}")
+        
         service_calls = []
         for state in on_states:
+            brightness = proportional_brightnesses.get(state.entity_id, target_brightness)
             service_data = {"entity_id": state.entity_id, ATTR_BRIGHTNESS: brightness}
             add_color_attributes(service_data, state.entity_id, self.coordinator.hue_offsets, **kwargs)
             service_calls.append(

@@ -23,20 +23,160 @@ from .const import LOGGER_NAME
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
-def calculate_average_brightness(on_states: list[State]) -> int | None:
-    """Calculate the average brightness of on states."""
+def calculate_group_brightness(on_states: list[State], stored_proportions: dict[str, float] | None = None) -> int | None:
+    """Calculate the group brightness level like Apple Music volume.
+    
+    Instead of simple averaging, this calculates what the group level should be
+    based on the current brightness of lights and their known proportions.
+    
+    For example:
+    - Light A (proportion 0.5) at 127 brightness 
+    - Light B (proportion 1.0) at 255 brightness
+    - Group level = 255 (since the 1.0 proportion light is at maximum)
+    """
     if not on_states:
         return None
-        
-    brightness_values = [s.attributes.get(ATTR_BRIGHTNESS, 255) for s in on_states]
-    _LOGGER.debug(f"Calculating average brightness from {len(on_states)} ON lights:")
-    for i, s in enumerate(on_states):
-        brightness = s.attributes.get(ATTR_BRIGHTNESS, 255)
-        _LOGGER.debug(f"  {s.entity_id}: brightness={brightness}")
     
-    avg_brightness = int(sum(brightness_values) / len(brightness_values)) if brightness_values else None
-    _LOGGER.debug(f"Average brightness calculated: {avg_brightness}")
-    return avg_brightness
+    if not stored_proportions:
+        # Fallback to simple average if no proportions stored yet
+        brightness_values = [s.attributes.get(ATTR_BRIGHTNESS, 255) for s in on_states]
+        avg_brightness = int(sum(brightness_values) / len(brightness_values)) if brightness_values else None
+        _LOGGER.debug(f"No stored proportions - using simple average: {avg_brightness}")
+        return avg_brightness
+    
+    # Calculate group level from highest ratio of actual/expected brightness
+    group_levels = []
+    _LOGGER.debug(f"Calculating group brightness from {len(on_states)} ON lights:")
+    
+    for s in on_states:
+        current_brightness = s.attributes.get(ATTR_BRIGHTNESS, 255)
+        expected_proportion = stored_proportions.get(s.entity_id, 1.0)
+        
+        if expected_proportion > 0:
+            # What would the group level be if this light represents its proportion?
+            implied_group_level = current_brightness / expected_proportion
+            group_levels.append(implied_group_level)
+            _LOGGER.debug(f"  {s.entity_id}: {current_brightness} ÷ {expected_proportion:.3f} = {implied_group_level:.1f}")
+        else:
+            _LOGGER.debug(f"  {s.entity_id}: skipping (zero proportion)")
+    
+    if not group_levels:
+        return None
+    
+    # Use the maximum implied group level (like Apple Music - one device can be at max)
+    group_brightness = int(max(group_levels))
+    group_brightness = max(1, min(255, group_brightness))  # Clamp to valid range
+    
+    _LOGGER.debug(f"Group brightness calculated: {group_brightness}")
+    return group_brightness
+
+
+def calculate_proportional_brightness(
+    on_states: list[State], target_brightness: int, stored_proportions: dict[str, float] | None = None
+) -> tuple[dict[str, int], dict[str, float]]:
+    """Calculate proportional brightness maintaining stable target-based proportions.
+    
+    Like Apple Music/AirPlay: maintains relative brightness relationships between lights
+    while scaling the group to the target level. Each light keeps its proportion.
+    
+    Special case: 100% (255) means scale all lights to their maximum while maintaining proportions
+    
+    Returns:
+        tuple: (brightness_dict, updated_proportions_dict)
+    """
+    if not on_states:
+        return {}, {}
+    
+    entity_ids = [s.entity_id for s in on_states]
+    
+    # Special case: 100% means scale proportionally to maximum
+    if target_brightness >= 255:
+        _LOGGER.debug("Target is 100% (255) - scaling proportionally to maximum")
+        # If no stored proportions, calculate from current state
+        if stored_proportions is None:
+            current_brightnesses = {}
+            for s in on_states:
+                current_brightnesses[s.entity_id] = s.attributes.get(ATTR_BRIGHTNESS, 255)
+            
+            # Find the highest current brightness to use as scaling reference
+            max_current = max(current_brightnesses.values()) if current_brightnesses.values() else 255
+            if max_current == 0:
+                max_current = 255  # Avoid division by zero
+            
+            # Scale all lights so the brightest one hits 255
+            proportions = {}
+            for entity_id, brightness in current_brightnesses.items():
+                proportions[entity_id] = brightness / max_current
+                
+            new_brightnesses = {}
+            for entity_id in entity_ids:
+                new_brightnesses[entity_id] = int(255 * proportions[entity_id])
+                if new_brightnesses[entity_id] < 1:
+                    new_brightnesses[entity_id] = 1
+        else:
+            # Use stored proportions, scale so highest proportion hits 255
+            max_proportion = max(stored_proportions.get(eid, 1.0) for eid in entity_ids)
+            proportions = {entity_id: stored_proportions.get(entity_id, 1.0) for entity_id in entity_ids}
+            new_brightnesses = {}
+            for entity_id in entity_ids:
+                new_brightnesses[entity_id] = int(255 * (proportions[entity_id] / max_proportion))
+                if new_brightnesses[entity_id] < 1:
+                    new_brightnesses[entity_id] = 1
+                    
+        return new_brightnesses, proportions
+    
+    # Special case: 0% means all lights at minimum  
+    if target_brightness <= 1:
+        _LOGGER.debug("Target is 0% (1) - setting all lights to minimum brightness")
+        new_brightnesses = {entity_id: 1 for entity_id in entity_ids}
+        # Keep existing proportions
+        if stored_proportions is None:
+            proportions = {entity_id: 1.0 for entity_id in entity_ids}
+        else:
+            proportions = {entity_id: stored_proportions.get(entity_id, 1.0) for entity_id in entity_ids}
+        return new_brightnesses, proportions
+    
+    # Normal case: Proportional scaling
+    # If no stored proportions, calculate from current state
+    if stored_proportions is None:
+        current_brightnesses = {}
+        for s in on_states:
+            current_brightnesses[s.entity_id] = s.attributes.get(ATTR_BRIGHTNESS, 255)
+        
+        current_avg = sum(current_brightnesses.values()) / len(current_brightnesses)
+        _LOGGER.debug(f"Initializing proportions from current state (avg: {current_avg:.1f})")
+        
+        if current_avg == 0:
+            # All lights at 0 - start with equal proportions
+            proportions = {entity_id: 1.0 for entity_id in entity_ids}
+            _LOGGER.debug("All lights at 0, using equal proportions (1.0 each)")
+        else:
+            # Calculate proportions relative to current average
+            proportions = {}
+            for entity_id, brightness in current_brightnesses.items():
+                proportions[entity_id] = brightness / current_avg
+                _LOGGER.debug(f"  {entity_id}: {brightness} / {current_avg:.1f} = {proportions[entity_id]:.3f}")
+    else:
+        # Use stored proportions, but only for entities that are currently on
+        proportions = {entity_id: stored_proportions.get(entity_id, 1.0) for entity_id in entity_ids}
+        _LOGGER.debug(f"Using stored proportions: {proportions}")
+    
+    # Calculate target brightness for each light based on stable proportions
+    new_brightnesses = {}
+    for entity_id in entity_ids:
+        # Calculate ideal brightness based on target and proportion
+        ideal_brightness = target_brightness * proportions[entity_id]
+        # Clamp to valid range
+        actual_brightness = max(1, min(255, int(ideal_brightness)))
+        new_brightnesses[entity_id] = actual_brightness
+        
+        _LOGGER.debug(f"  {entity_id}: target={target_brightness} × {proportions[entity_id]:.3f} = {ideal_brightness:.1f} -> {actual_brightness}")
+    
+    # Verify the result
+    actual_avg = sum(new_brightnesses.values()) / len(new_brightnesses)
+    _LOGGER.debug(f"Target brightness: {target_brightness}, achieved: {actual_avg:.1f}")
+    
+    return new_brightnesses, proportions
 
 
 def calculate_average_color_and_effect(
