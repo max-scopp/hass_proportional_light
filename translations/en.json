@@ -1,0 +1,15 @@
+{
+    "config": {
+      "step": {
+        "user": {
+          "title": "Proportional Light Group",
+          "description": "Create a light entity that scales its members proportionally",
+          "data": {
+            "name": "Group name",
+            "entities": "Select lights to include"
+          }
+        }
+      }
+    }
+  }
+  
