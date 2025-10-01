@@ -1,14 +1,16 @@
 # Proportional Light
 
-> Group lights that keep their personality instead of being boringly identical.
+> A Home Assistant custom component that makes managing your lights more natural.
 
-One slider controls all lights, but each keeps its individual character. Kitchen stays dimmer, living room brighter. Just like Apple Music's multi-room controls.
+Control all your lights as a group while keeping their unique personalities. Just like Apple Music's multi-room controls, each light stays distinct while working in harmony.
 
-## Add Flair with Hue Offsets
+## Features
 
-- Each light in the group can have a unique hue offset, adding personality to your lighting.
-- For example, setting the group to "Red":
-  - Living room: Red + 10° = warm red-orange
-  - Kitchen: Red - 20° = cool red-purple
-  - Bedroom: Red = pure red
-- The group shows the commanded color briefly, then displays the averaged actual colors.
+- **Proportional Brightness**: Maintain natural brightness relationships between lights while scaling the group.
+- **Hue Offsets**: Add personality to your lights with per-light hue adjustments.
+
+## Quick Setup
+
+1. Add your lights to the integration.
+2. Configure per-light hue offsets (-180° to +180°).
+3. Use the group color picker to enjoy natural, dynamic lighting.

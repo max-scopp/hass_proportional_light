@@ -1,10 +1,15 @@
 {
-  "domain": "proportional_light",
-  "name": "Proportional Light",
-  "version": "0.2.0",
-  "documentation": "https://github.com/max-scopp/proportional_light",
-  "requirements": [],
-  "dependencies": [],
-  "codeowners": ["@max-scopp"],
-  "config_flow": true
+	"domain": "proportional_light",
+	"name": "Proportional Light",
+	"version": "0.2.0",
+	"documentation": "https://github.com/max-scopp/hass_proportional_light",
+	"requirements": [],
+	"dependencies": [],
+	"codeowners": ["@max-scopp"],
+	"config_flow": true,
+	"integration_type": "device",
+	"logos": {
+		"small": "icons/icon.png",
+		"large": "icons/logo.png"
+	}
 }
