@@ -7,8 +7,8 @@ from typing import Any
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_TEMP_KELVIN,
-    ATTR_EFFECT,
     ATTR_HS_COLOR,
+    ATTR_RGB_COLOR,
     ColorMode,
     LightEntity,
 )
@@ -77,15 +77,7 @@ class ProportionalLight(LightEntity):
         if temp != getattr(self, '_last_color_temp', None):
             self._last_color_temp = temp
             _LOGGER.debug(f"Entity {self._attr_name} color_temp_kelvin property returning: {temp}")
-        return temp    @property
-    def effect(self) -> str | None:
-        """Return the current effect."""
-        return self.coordinator.effect
-    
-    @property
-    def effect_list(self) -> list[str] | None:
-        """Return the list of supported effects."""
-        return self.coordinator.effects if self.coordinator.effects else None
+        return temp
     
     @property
     def supported_color_modes(self) -> set[ColorMode] | None:
@@ -135,6 +127,19 @@ class ProportionalLight(LightEntity):
         
         # Extract brightness and filter it out of kwargs to avoid conflicts
         target_brightness = kwargs.pop(ATTR_BRIGHTNESS, None)
+        
+        # Store group target colors for Apple Music-style behavior
+        if ATTR_HS_COLOR in kwargs:
+            self.coordinator.set_group_target_color(kwargs[ATTR_HS_COLOR])
+        elif ATTR_RGB_COLOR in kwargs:
+            # Convert RGB to HS for consistent target storage
+            import colorsys
+            r, g, b = kwargs[ATTR_RGB_COLOR]
+            h_norm, s_norm, _ = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
+            h, s = h_norm * 360.0, s_norm * 100.0
+            self.coordinator.set_group_target_color((h, s))
+        elif ATTR_COLOR_TEMP_KELVIN in kwargs:
+            self.coordinator.set_group_target_temp(kwargs[ATTR_COLOR_TEMP_KELVIN])
         
         # Get currently ON lights
         on_states = get_on_states(states)

@@ -6,7 +6,6 @@ import logging
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_COLOR_TEMP_KELVIN,
-    ATTR_EFFECT,
     ATTR_HS_COLOR,
     ATTR_RGB_COLOR,
     ATTR_RGBW_COLOR,
@@ -147,30 +146,40 @@ def calculate_proportional_brightness(
     return new_brightnesses, proportions
 
 
-def calculate_average_color_and_effect(
+def _simple_color_average(colors: list[tuple[float, float]]) -> tuple[tuple[float, float], None, None]:
+    """Simple color averaging using Home Assistant's approach.
+    
+    Just average the hue and saturation values - let HA handle the complexity.
+    This creates intuitive results like blue + red = purple.
+    """
+    if len(colors) == 1:
+        return colors[0], None, None
+    
+    # Simple averaging - works well for most cases
+    avg_h = sum(h for h, s in colors) / len(colors)
+    avg_s = sum(s for h, s in colors) / len(colors)
+    
+    _LOGGER.debug(f"Simple color average: {colors} -> HS({avg_h:.1f}, {avg_s:.1f})")
+    return (avg_h, avg_s), None, None
+
+
+def calculate_average_color(
     on_states: list[State], hue_offsets: dict[str, float]
-) -> tuple[tuple[float, float] | None, int | None, str | None]:
-    """Calculate average color and effect from on states."""
+) -> tuple[tuple[float, float] | None, int | None]:
+    """Calculate average color from on states."""
     if not on_states:
-        return None, None, None
+        return None, None
 
     # Debug: Log all available attributes for each light
     for s in on_states:
         _LOGGER.debug(f"Light {s.entity_id} all attributes: {dict(s.attributes)}")
         _LOGGER.debug(f"Light {s.entity_id} color attributes:")
-        for attr_name in [ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_COLOR_TEMP_KELVIN, ATTR_XY_COLOR, ATTR_EFFECT]:
+        for attr_name in [ATTR_HS_COLOR, ATTR_RGB_COLOR, ATTR_COLOR_TEMP_KELVIN, ATTR_XY_COLOR]:
             attr_value = s.attributes.get(attr_name)
             if attr_value is not None:
                 _LOGGER.debug(f"  {attr_name}: {attr_value}")
             else:
                 _LOGGER.debug(f"  {attr_name}: None")
-
-    # Check for active effects first (but ignore "off" effect)
-    effects = [s.attributes.get(ATTR_EFFECT) for s in on_states 
-               if s.attributes.get(ATTR_EFFECT) and s.attributes.get(ATTR_EFFECT) != 'off']
-    if effects:
-        _LOGGER.debug(f"Found active effect: {effects[0]}")
-        return None, None, effects[0]  # Use first effect found
     
     # Collect all colors from ON lights for averaging
     import colorsys
@@ -191,15 +200,9 @@ def calculate_average_color_and_effect(
             h, sat = s.attributes.get(ATTR_HS_COLOR)
             # Only use HS color if it has actual saturation (not just white light)
             if sat > 5:  # More than 5% saturation means it's actually colored
-                # Apply hue offset compensation if configured
-                if s.entity_id in hue_offsets:
-                    offset = hue_offsets[s.entity_id]
-                    original_h = (h - offset) % 360  # Remove offset to get original
-                    _LOGGER.debug(f"Collecting HS color from {s.entity_id}: ({original_h:.1f}, {sat:.1f}) (offset removed: {offset})")
-                    collected_colors.append((original_h, sat))
-                else:
-                    _LOGGER.debug(f"Collecting HS color from {s.entity_id}: ({h:.1f}, {sat:.1f})")
-                    collected_colors.append((h, sat))
+                # Use the actual current color (what the light actually looks like)
+                _LOGGER.debug(f"Collecting HS color from {s.entity_id}: ({h:.1f}, {sat:.1f})")
+                collected_colors.append((h, sat))
             else:
                 _LOGGER.debug(f"Light {s.entity_id} has HS color but low saturation ({sat:.1f}%) - treating as white")
         
@@ -247,38 +250,19 @@ def calculate_average_color_and_effect(
             _LOGGER.debug(f"Converting legacy color_temp from {s.entity_id}: {color_temp} mired ({kelvin}K) -> RGB{rgb} -> HS({h:.1f}, {sat:.1f})")
             collected_colors.append((h, sat))
     
-    # If we collected any colors, average them
+    # If we collected any colors, average them intelligently
     if collected_colors:
         _LOGGER.debug(f"Averaging {len(collected_colors)} colors: {collected_colors}")
         
-        # Convert HS colors to RGB for proper averaging
-        rgb_colors = []
-        for h, s in collected_colors:
-            # Convert HS to RGB for averaging
-            h_norm = h / 360.0
-            s_norm = s / 100.0
-            r, g, b = colorsys.hsv_to_rgb(h_norm, s_norm, 1.0)  # Full brightness
-            rgb_colors.append((r * 255, g * 255, b * 255))
-        
-        # Average the RGB values
-        avg_r = sum(color[0] for color in rgb_colors) / len(rgb_colors)
-        avg_g = sum(color[1] for color in rgb_colors) / len(rgb_colors)
-        avg_b = sum(color[2] for color in rgb_colors) / len(rgb_colors)
-        
-        # Convert back to HS
-        h_norm, s_norm, _ = colorsys.rgb_to_hsv(avg_r/255.0, avg_g/255.0, avg_b/255.0)
-        avg_h = h_norm * 360.0
-        avg_s = s_norm * 100.0
-        
-        _LOGGER.debug(f"Averaged RGB({avg_r:.0f},{avg_g:.0f},{avg_b:.0f}) -> HS({avg_h:.1f}, {avg_s:.1f})")
-        return (avg_h, avg_s), None, None
+        avg_color, _, _ = _simple_color_average(collected_colors)
+        return avg_color, None
     
     # Second pass: use color temperature if no actual colors found
     for s in on_states:
         if s.attributes.get(ATTR_COLOR_TEMP_KELVIN):
             kelvin = s.attributes.get(ATTR_COLOR_TEMP_KELVIN)
             _LOGGER.debug(f"Using color temperature from {s.entity_id}: {kelvin}K")
-            return None, kelvin, None
+            return None, kelvin
         elif s.attributes.get('color_temp'):
             # Some lights might use 'color_temp' instead of 'color_temp_kelvin'
             color_temp = s.attributes.get('color_temp')
@@ -287,7 +271,7 @@ def calculate_average_color_and_effect(
             if color_temp:
                 kelvin = int(1000000 / color_temp) if color_temp > 0 else 3000
                 _LOGGER.debug(f"Converted to kelvin: {kelvin}K")
-                return None, kelvin, None
+                return None, kelvin
     
     # If no colors found, try averaging color temperatures
     kelvin_values = [s.attributes.get(ATTR_COLOR_TEMP_KELVIN) for s in on_states 
@@ -295,17 +279,16 @@ def calculate_average_color_and_effect(
     if kelvin_values:
         avg_kelvin = int(sum(kelvin_values) / len(kelvin_values))
         _LOGGER.debug(f"Averaged {len(kelvin_values)} kelvin values: {avg_kelvin}K")
-        return None, avg_kelvin, None
+        return None, avg_kelvin
     
     # Final fallback - if no color information at all, provide a default warm white color
     _LOGGER.debug("No color information found, using default warm white (3000K)")
-    return None, 3000, None
+    return None, 3000
 
 
-def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], list[str], int | None, int | None]:
-    """Calculate supported color modes, effects, and temperature ranges from all entities."""
+def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], int | None, int | None]:
+    """Calculate supported color modes and temperature ranges from all entities."""
     modes = set()
-    effects = set()
     min_kelvin_values = []
     max_kelvin_values = []
     
@@ -313,10 +296,6 @@ def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], l
         # Collect supported color modes
         if s.attributes.get("supported_color_modes"):
             modes.update(s.attributes["supported_color_modes"])
-        
-        # Collect effects
-        if s.attributes.get("effect_list"):
-            effects.update(s.attributes["effect_list"])
         
         # Collect color temperature ranges
         if s.attributes.get("min_color_temp_kelvin"):
@@ -334,21 +313,19 @@ def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], l
     min_kelvin = max(min_kelvin_values) if min_kelvin_values else None
     max_kelvin = min(max_kelvin_values) if max_kelvin_values else None
     
-    return modes, sorted(effects) if effects else [], min_kelvin, max_kelvin
+    return modes, min_kelvin, max_kelvin
 
 
 def add_color_attributes(
     service_data: dict, entity_id: str, hue_offsets: dict[str, float], **kwargs
 ) -> None:
-    """Add color/effect attributes to service data with hue offset support."""
+    """Add color attributes to service data with hue offset support."""
     import colorsys
     
     _LOGGER.debug(f"add_color_attributes called for {entity_id} with hue_offsets: {hue_offsets}, kwargs: {kwargs}")
     
-    # Priority: effect > hs_color > color_temp > other colors
-    if ATTR_EFFECT in kwargs:
-        service_data[ATTR_EFFECT] = kwargs[ATTR_EFFECT]
-    elif ATTR_HS_COLOR in kwargs:
+    # Priority: hs_color > color_temp > other colors
+    if ATTR_HS_COLOR in kwargs:
         if entity_id in hue_offsets:
             # Apply hue offset for this specific entity
             h, s = kwargs[ATTR_HS_COLOR]

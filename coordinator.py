@@ -15,7 +15,7 @@ from .utils import (
     filter_valid_states,
     get_on_states,
     calculate_group_brightness,
-    calculate_average_color_and_effect,
+    calculate_average_color,
     calculate_supported_features,
     calculate_proportional_brightness,
 )
@@ -43,11 +43,14 @@ class ProportionalLightCoordinator:
         self._brightness: int | None = None
         self._hs_color: tuple[float, float] | None = None
         self._color_temp_kelvin: int | None = None
-        self._effect: str | None = None
         self._supported_color_modes: set = set()
-        self._effects: list[str] = []
         self._min_color_temp_kelvin: int | None = None
         self._max_color_temp_kelvin: int | None = None
+        
+        # Group target color (what user set, without offsets applied)
+        self._group_target_color: tuple[float, float] | None = None
+        self._group_target_temp_kelvin: int | None = None
+        self._last_command_was_color: bool = False  # Track if last command was color vs temp
         
         # Brightness proportions for stable scaling
         self._brightness_proportions: dict[str, float] = {}
@@ -79,28 +82,26 @@ class ProportionalLightCoordinator:
     
     @property
     def hs_color(self) -> tuple[float, float] | None:
-        """Return the HS color."""
+        """Return the HS color for the group UI."""
+        # Show group target color if we have one and last command was color
+        if self._group_target_color and self._last_command_was_color:
+            return self._group_target_color
+        # Otherwise show averaged color from lights
         return self._hs_color
     
     @property
     def color_temp_kelvin(self) -> int | None:
-        """Return the color temperature in Kelvin."""
+        """Return the color temperature in Kelvin for the group UI."""
+        # Show group target temp if we have one and last command was temp
+        if self._group_target_temp_kelvin and not self._last_command_was_color:
+            return self._group_target_temp_kelvin
+        # Otherwise show averaged temp from lights
         return self._color_temp_kelvin
-    
-    @property
-    def effect(self) -> str | None:
-        """Return the current effect."""
-        return self._effect
     
     @property
     def supported_color_modes(self) -> set:
         """Return supported color modes."""
         return self._supported_color_modes
-    
-    @property
-    def effects(self) -> list[str]:
-        """Return available effects."""
-        return self._effects
     
     @property
     def min_color_temp_kelvin(self) -> int | None:
@@ -164,6 +165,11 @@ class ProportionalLightCoordinator:
         _LOGGER.debug("_handle_state_change called - updating coordinator state")
         # Small delay to ensure the state has been updated in HA
         await asyncio.sleep(0.05)
+        
+        # Clear group targets when lights change externally (not from our commands)
+        # This makes the group show the averaged color from individual light changes
+        self.clear_group_targets()
+        
         await self.async_update_state()
         self._notify_callbacks()
         _LOGGER.debug("_handle_state_change completed - callbacks notified")
@@ -230,31 +236,27 @@ class ProportionalLightCoordinator:
             
             old_hs_color = self._hs_color
             old_color_temp = self._color_temp_kelvin
-            old_effect = self._effect
             
-            self._hs_color, self._color_temp_kelvin, self._effect = (
-                calculate_average_color_and_effect(on_states, self._hue_offsets)
+            self._hs_color, self._color_temp_kelvin = (
+                calculate_average_color(on_states, self._hue_offsets)
             )
             
             _LOGGER.debug(f"Coordinator color updated:")
             _LOGGER.debug(f"  HS color: {old_hs_color} -> {self._hs_color}")
             _LOGGER.debug(f"  Color temp: {old_color_temp} -> {self._color_temp_kelvin}")
-            _LOGGER.debug(f"  Effect: {old_effect} -> {self._effect}")
             
             # Also log what the entity will see
-            _LOGGER.debug(f"Entity will now have: hs_color={self._hs_color}, color_temp_kelvin={self._color_temp_kelvin}, effect={self._effect}")
+            _LOGGER.debug(f"Entity will now have: hs_color={self._hs_color}, color_temp_kelvin={self._color_temp_kelvin}")
         else:
             # All lights are off
             _LOGGER.debug("All lights are off, resetting brightness to None")
             self._brightness = None
             self._hs_color = None
             self._color_temp_kelvin = None
-            self._effect = None
         
         # Update supported features from all entities
         (
             self._supported_color_modes,
-            self._effects,
             self._min_color_temp_kelvin,
             self._max_color_temp_kelvin,
         ) = calculate_supported_features(states)
@@ -265,11 +267,51 @@ class ProportionalLightCoordinator:
         self._brightness = None
         self._hs_color = None
         self._color_temp_kelvin = None
-        self._effect = None
         self._supported_color_modes = set()
-        self._effects = []
         self._min_color_temp_kelvin = None
         self._max_color_temp_kelvin = None
+        
+        # Clear group targets
+        self._group_target_color = None
+        self._group_target_temp_kelvin = None
+        self._last_command_was_color = False
+    
+    def set_group_target_color(self, hs_color: tuple[float, float] | None) -> None:
+        """Set the group target color (what user commanded, before offsets)."""
+        self._group_target_color = hs_color
+        self._group_target_temp_kelvin = None
+        self._last_command_was_color = True
+        _LOGGER.debug(f"Group target color set to: {hs_color}")
+        
+        # Schedule clearing targets after a delay to distinguish our commands from external changes
+        self.hass.async_create_task(self._delayed_clear_targets())
+    
+    def set_group_target_temp(self, temp_kelvin: int | None) -> None:
+        """Set the group target color temperature (what user commanded)."""
+        self._group_target_temp_kelvin = temp_kelvin
+        self._group_target_color = None
+        self._last_command_was_color = False
+        _LOGGER.debug(f"Group target temp set to: {temp_kelvin}K")
+        
+        # Schedule clearing targets after a delay
+        self.hass.async_create_task(self._delayed_clear_targets())
+    
+    def clear_group_targets(self) -> None:
+        """Clear group targets when lights change externally."""
+        self._group_target_color = None
+        self._group_target_temp_kelvin = None
+        _LOGGER.debug("Group target colors cleared - showing averaged colors")
+    
+    async def _delayed_clear_targets(self) -> None:
+        """Clear group targets after a delay, allowing our commands to settle."""
+        # Wait longer than the state change delay to let our commands settle
+        await asyncio.sleep(2.0)  # 2 seconds should be enough for commands to apply
+        
+        # Only clear if no recent commands (avoid clearing during rapid user interaction)
+        if self._group_target_color or self._group_target_temp_kelvin:
+            _LOGGER.debug("Auto-clearing group targets after command delay")
+            self.clear_group_targets()
+            self._notify_callbacks()
     
     def _notify_callbacks(self) -> None:
         """Notify all registered callbacks of state changes."""
