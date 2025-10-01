@@ -7,6 +7,18 @@ from homeassistant.helpers import selector
 
 DOMAIN = "proportional_light"
 
+def _is_colorable_entity(hass, entity_id: str) -> bool:
+    """Check if an entity supports color (RGB/HS modes)."""
+    state = hass.states.get(entity_id)
+    if not state:
+        return False
+    
+    supported_modes = state.attributes.get("supported_color_modes", [])
+    # Check if entity supports any color modes that allow RGB/HS colors
+    colorable_modes = {"hs", "xy", "rgb", "rgbw", "rgbww"}
+    return any(mode in supported_modes for mode in colorable_modes)
+
+
 class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
@@ -46,12 +58,14 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
         hue_offsets = self._config_entry.data.get("hue_offsets", {})
 
         if user_input is not None:
-            # Extract hue offsets from user input
+            # Extract hue offsets from user input - only for colorable entities
             new_hue_offsets = {}
             for key, value in user_input.items():
                 if key.startswith("hue_offset_"):
                     entity_id = key.replace("hue_offset_", "")
-                    new_hue_offsets[entity_id] = float(value)
+                    # Only save hue offset if entity is colorable
+                    if _is_colorable_entity(self.hass, entity_id):
+                        new_hue_offsets[entity_id] = float(value)
             
             # Update the config entry data directly
             self.hass.config_entries.async_update_entry(
@@ -64,16 +78,57 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
             return self.async_create_entry(title="", data={})
 
         # Build hue offset schema dynamically based on selected entities
+        # Only show hue offset options for colorable entities
         hue_offset_schema = {}
-        for entity_id in entities:
-            hue_offset_schema[vol.Optional(f"hue_offset_{entity_id}", default=hue_offsets.get(entity_id, 0.0))] = vol.Coerce(float)
+        colorable_entities = [entity_id for entity_id in entities if _is_colorable_entity(self.hass, entity_id)]
+        
+        for entity_id in colorable_entities:
+            # Use a more user-friendly field name
+            state = self.hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            field_name = f"hue_offset_{entity_id}"
+            
+            # Create a descriptive field with the friendly name and description
+            hue_offset_schema[vol.Optional(field_name, default=hue_offsets.get(entity_id, 0.0))] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=-180.0,
+                    max=180.0,
+                    step=1.0,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="°"
+                )
+            )
 
-        schema = vol.Schema({
+        # Create organized schema with sections
+        schema_dict = {
             vol.Required(CONF_ENTITIES, default=entities): selector.EntitySelector(
                 selector.EntitySelectorConfig(
                     domain="light", multiple=True
                 )
             ),
-            **hue_offset_schema
-        })
-        return self.async_show_form(step_id="options", data_schema=schema, errors=errors)
+        }
+        
+        # Add hue offset section if there are colorable entities
+        if hue_offset_schema:
+            schema_dict.update(hue_offset_schema)
+        
+        schema = vol.Schema(schema_dict)
+        
+        # Create concise description for the options form
+        description_placeholders = {}
+        if colorable_entities:
+            colorable_count = len(colorable_entities)
+            non_colorable_count = len(entities) - colorable_count
+            if non_colorable_count > 0:
+                description_placeholders["info"] = f"{colorable_count} color lights, {non_colorable_count} brightness-only"
+            else:
+                description_placeholders["info"] = f"All {colorable_count} lights support color"
+        else:
+            description_placeholders["info"] = "No colorable lights found"
+        
+        return self.async_show_form(
+            step_id="options", 
+            data_schema=schema, 
+            errors=errors,
+            description_placeholders=description_placeholders
+        )

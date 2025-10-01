@@ -341,6 +341,10 @@ def add_color_attributes(
     service_data: dict, entity_id: str, hue_offsets: dict[str, float], **kwargs
 ) -> None:
     """Add color/effect attributes to service data with hue offset support."""
+    import colorsys
+    
+    _LOGGER.debug(f"add_color_attributes called for {entity_id} with hue_offsets: {hue_offsets}, kwargs: {kwargs}")
+    
     # Priority: effect > hs_color > color_temp > other colors
     if ATTR_EFFECT in kwargs:
         service_data[ATTR_EFFECT] = kwargs[ATTR_EFFECT]
@@ -350,18 +354,49 @@ def add_color_attributes(
             h, s = kwargs[ATTR_HS_COLOR]
             offset_h = (h + hue_offsets[entity_id]) % 360
             service_data[ATTR_HS_COLOR] = (offset_h, s)
+            _LOGGER.debug(f"Applied hue offset {hue_offsets[entity_id]}° to {entity_id}: {h}° -> {offset_h}°")
         else:
             service_data[ATTR_HS_COLOR] = kwargs[ATTR_HS_COLOR]
     elif ATTR_COLOR_TEMP_KELVIN in kwargs:
         service_data[ATTR_COLOR_TEMP_KELVIN] = kwargs[ATTR_COLOR_TEMP_KELVIN]
     elif ATTR_RGB_COLOR in kwargs:
-        service_data[ATTR_RGB_COLOR] = kwargs[ATTR_RGB_COLOR]
+        if entity_id in hue_offsets:
+            # Apply hue offset by converting RGB -> HS -> offset -> RGB
+            r, g, b = kwargs[ATTR_RGB_COLOR]
+            h_norm, s_norm, v_norm = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
+            h = h_norm * 360.0
+            offset_h = (h + hue_offsets[entity_id]) % 360
+            offset_h_norm = offset_h / 360.0
+            
+            # Convert back to RGB
+            r_new, g_new, b_new = colorsys.hsv_to_rgb(offset_h_norm, s_norm, v_norm)
+            service_data[ATTR_RGB_COLOR] = (int(r_new * 255), int(g_new * 255), int(b_new * 255))
+            _LOGGER.debug(f"Applied hue offset {hue_offsets[entity_id]}° to {entity_id}: RGB({r},{g},{b}) -> RGB({int(r_new * 255)},{int(g_new * 255)},{int(b_new * 255)})")
+        else:
+            service_data[ATTR_RGB_COLOR] = kwargs[ATTR_RGB_COLOR]
     elif ATTR_RGBW_COLOR in kwargs:
         service_data[ATTR_RGBW_COLOR] = kwargs[ATTR_RGBW_COLOR]
     elif ATTR_RGBWW_COLOR in kwargs:
         service_data[ATTR_RGBWW_COLOR] = kwargs[ATTR_RGBWW_COLOR]
     elif ATTR_XY_COLOR in kwargs:
-        service_data[ATTR_XY_COLOR] = kwargs[ATTR_XY_COLOR]
+        if entity_id in hue_offsets:
+            # Apply hue offset by converting XY -> HS -> offset -> XY
+            from homeassistant.util.color import color_xy_to_hs, color_hs_to_xy
+            x, y = kwargs[ATTR_XY_COLOR]
+            try:
+                # Convert XY to HS
+                h, s = color_xy_to_hs(x, y)
+                # Apply hue offset
+                offset_h = (h + hue_offsets[entity_id]) % 360
+                # Convert back to XY
+                new_x, new_y = color_hs_to_xy(offset_h, s)
+                service_data[ATTR_XY_COLOR] = (new_x, new_y)
+                _LOGGER.debug(f"Applied hue offset {hue_offsets[entity_id]}° to {entity_id}: XY({x:.3f},{y:.3f}) -> HS({h:.1f},{s:.1f}) -> HS({offset_h:.1f},{s:.1f}) -> XY({new_x:.3f},{new_y:.3f})")
+            except Exception as e:
+                _LOGGER.warning(f"Failed to apply hue offset to XY color for {entity_id}: {e}")
+                service_data[ATTR_XY_COLOR] = kwargs[ATTR_XY_COLOR]
+        else:
+            service_data[ATTR_XY_COLOR] = kwargs[ATTR_XY_COLOR]
 
 
 def filter_valid_states(hass, entity_ids: list[str]) -> list[State]:

@@ -32,6 +32,8 @@ class ProportionalLightCoordinator:
         self.entry = entry
         self._entities: list[str] = entry.data.get(CONF_ENTITIES, [])
         self._hue_offsets: dict[str, float] = entry.data.get(CONF_HUE_OFFSETS, {})
+        _LOGGER.debug(f"Coordinator initialized with entities: {self._entities}")
+        _LOGGER.debug(f"Coordinator initialized with hue_offsets: {self._hue_offsets}")
         self._update_callbacks: list[Callable[[], None]] = []
         self._unsub_update_listener = None
         self._unsub_state_listener = None
@@ -166,8 +168,7 @@ class ProportionalLightCoordinator:
         self._notify_callbacks()
         _LOGGER.debug("_handle_state_change completed - callbacks notified")
     
-    @callback
-    def _config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    async def _config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Handle config entry updates."""
         old_entities = set(self._entities)
         new_entities = set(entry.data.get(CONF_ENTITIES, []))
@@ -178,12 +179,10 @@ class ProportionalLightCoordinator:
         # If entities changed, we need to re-setup state tracking
         if old_entities != new_entities:
             # Schedule a full reload to restart with new entity tracking
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(entry.entry_id)
-            )
+            await self.hass.config_entries.async_reload(entry.entry_id)
         else:
             # Just update state if only settings changed
-            self.hass.async_create_task(self.async_update_state())
+            await self.async_update_state()
             self._notify_callbacks()
     
     async def async_update_state(self) -> None:

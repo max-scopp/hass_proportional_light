@@ -1,0 +1,34 @@
+{
+	"config": {
+		"step": {
+			"user": {
+				"title": "Proportionale Licht Einrichtung",
+				"description": "Wähle die Lichter aus, die du gruppieren möchtest. Jedes Licht behält seine individuelle Helligkeitsbeziehung bei, während es als eine Gruppe gesteuert wird.",
+				"data": {
+					"entities": "Lichter auswählen"
+				}
+			}
+		}
+	},
+	"options": {
+		"step": {
+			"options": {
+				"title": "⚙️ Proportionales Licht konfigurieren",
+				"description": "Lichter auswählen und Farbton-Offsets einstellen, um Persönlichkeit hinzuzufügen. {info}",
+				"data": {
+					"entities": "🔗 Lichtauswahl"
+				},
+				"data_description": {
+					"entities": "Wähle aus, welche Lichter in diese proportionale Gruppe aufgenommen werden sollen"
+				}
+			}
+		}
+	},
+	"entity": {
+		"light": {
+			"proportional_light": {
+				"name": "Proportionales Licht"
+			}
+		}
+	}
+}

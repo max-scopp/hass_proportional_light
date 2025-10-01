@@ -1,17 +1,23 @@
 # Proportional Light
 
-> A Home Assistant Custom Component that Groups multiple lights into one entity that works like Apple Music's multi-room audio controls.
+> Group lights that keep their personality instead of being boringly identical.
 
-Just like how Apple Music lets you control multiple HomePods as one group while maintaining each speaker's individual volume characteristics, this component lets you control multiple lights as one entity while preserving their individual brightness relationships.
+One slider controls all lights, but each keeps its individual character. Kitchen stays dimmer, living room brighter. Just like Apple Music's multi-room controls.
 
-Perfect for rooms with multiple lights where you want simple group control without losing each light's personality.
+## Add Flair with Hue Offsets
 
-## What It Does
+**Problem**: Set group to "red" → all lights show the exact same boring red  
+**Solution**: Give each light a unique hue offset for personality
 
-- **One slider controls all lights** - but each light keeps its individual brightness relationship
-- **Kitchen light stays dimmer, living room stays brighter** - just like your HomePods
-- **Move the group slider to 50%** - all lights scale down proportionally  
-- **Colors and effects work too** - averages colors across all lights
-- **Always stays in sync** - change any individual light and the group updates automatically
+- Living room: Red + 10° offset = warm red-orange glow
+- Kitchen: Red + (-20°) offset = cool red-purple accent  
+- Bedroom: Red + 0° offset = pure red
 
-That's it. Simple group control that respects each light's personality.
+Same "red" command, but each room gets its own flair.
+
+### Setup
+1. Add your colorable lights to the integration
+2. Configure → Set hue offsets (-180° to +180°) 
+3. Test: Set group to red, see each light's unique interpretation
+
+**Result**: No more identical, sterile lighting. Each room has character.

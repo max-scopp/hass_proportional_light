@@ -1,15 +1,34 @@
 {
-    "config": {
-      "step": {
-        "user": {
-          "title": "Proportional Light Group",
-          "description": "Create a light entity that scales its members proportionally",
-          "data": {
-            "name": "Group name",
-            "entities": "Select lights to include"
-          }
-        }
-      }
-    }
-  }
-  
+	"config": {
+		"step": {
+			"user": {
+				"title": "Proportional Light Setup",
+				"description": "Select the lights you want to group together. Each light will maintain its individual brightness relationship while being controlled as one group.",
+				"data": {
+					"entities": "Select Lights"
+				}
+			}
+		}
+	},
+	"options": {
+		"step": {
+			"options": {
+				"title": "⚙️ Configure Proportional Light",
+				"description": "Choose lights and set hue offsets to add personality. {info}",
+				"data": {
+					"entities": "🔗 Light Selection"
+				},
+				"data_description": {
+					"entities": "Choose which lights to include in this proportional group"
+				}
+			}
+		}
+	},
+	"entity": {
+		"light": {
+			"proportional_light": {
+				"name": "Proportional Light"
+			}
+		}
+	}
+}
