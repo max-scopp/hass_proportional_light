@@ -24,51 +24,19 @@ from .const import LOGGER_NAME
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
 def calculate_group_brightness(on_states: list[State], stored_proportions: dict[str, float] | None = None) -> int | None:
-    """Calculate the group brightness level like Apple Music volume.
+    """Calculate group brightness as the highest brightness of any light.
     
-    Instead of simple averaging, this calculates what the group level should be
-    based on the current brightness of lights and their known proportions.
-    
-    For example:
-    - Light A (proportion 0.5) at 127 brightness 
-    - Light B (proportion 1.0) at 255 brightness
-    - Group level = 255 (since the 1.0 proportion light is at maximum)
+    Simple and intuitive: if your brightest light is at 50%, the group shows 50%.
+    No complex calculations - just show the maximum brightness.
     """
     if not on_states:
         return None
     
-    if not stored_proportions:
-        # Fallback to simple average if no proportions stored yet
-        brightness_values = [s.attributes.get(ATTR_BRIGHTNESS, 255) for s in on_states]
-        avg_brightness = int(sum(brightness_values) / len(brightness_values)) if brightness_values else None
-        _LOGGER.debug(f"No stored proportions - using simple average: {avg_brightness}")
-        return avg_brightness
+    brightness_values = [s.attributes.get(ATTR_BRIGHTNESS, 255) for s in on_states]
+    max_brightness = max(brightness_values) if brightness_values else None
     
-    # Calculate group level from highest ratio of actual/expected brightness
-    group_levels = []
-    _LOGGER.debug(f"Calculating group brightness from {len(on_states)} ON lights:")
-    
-    for s in on_states:
-        current_brightness = s.attributes.get(ATTR_BRIGHTNESS, 255)
-        expected_proportion = stored_proportions.get(s.entity_id, 1.0)
-        
-        if expected_proportion > 0:
-            # What would the group level be if this light represents its proportion?
-            implied_group_level = current_brightness / expected_proportion
-            group_levels.append(implied_group_level)
-            _LOGGER.debug(f"  {s.entity_id}: {current_brightness} ÷ {expected_proportion:.3f} = {implied_group_level:.1f}")
-        else:
-            _LOGGER.debug(f"  {s.entity_id}: skipping (zero proportion)")
-    
-    if not group_levels:
-        return None
-    
-    # Use the maximum implied group level (like Apple Music - one device can be at max)
-    group_brightness = int(max(group_levels))
-    group_brightness = max(1, min(255, group_brightness))  # Clamp to valid range
-    
-    _LOGGER.debug(f"Group brightness calculated: {group_brightness}")
-    return group_brightness
+    _LOGGER.debug(f"Group brightness from {len(on_states)} lights: {brightness_values} -> max: {max_brightness}")
+    return max_brightness
 
 
 def calculate_proportional_brightness(
