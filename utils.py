@@ -327,8 +327,9 @@ def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], i
     if modes and ColorMode.ONOFF in modes and len(modes) > 1:
         modes.remove(ColorMode.ONOFF)
     if not modes:
-        _LOGGER.debug("No color modes found, defaulting to BRIGHTNESS")
-        modes = {ColorMode.BRIGHTNESS}
+        _LOGGER.debug("No color modes found from entities, defaulting to BRIGHTNESS + COLOR_TEMP")
+        # Default to reasonable capabilities to ensure adaptive_lighting compatibility
+        modes = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
     
     _LOGGER.debug(f"Final calculated modes: {modes}")
     

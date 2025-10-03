@@ -44,7 +44,8 @@ class ProportionalLightCoordinator:
         self._hs_color: tuple[float, float] | None = None
         self._color_temp_kelvin: int | None = None
         # Initialize with basic color modes to ensure adaptive_lighting compatibility
-        self._supported_color_modes: set = {ColorMode.BRIGHTNESS}
+        # Start with reasonable defaults, will be updated after analyzing member entities
+        self._supported_color_modes: set = {ColorMode.BRIGHTNESS, ColorMode.COLOR_TEMP}
         self._min_color_temp_kelvin: int | None = None
         self._max_color_temp_kelvin: int | None = None
         
@@ -271,6 +272,9 @@ class ProportionalLightCoordinator:
         
         _LOGGER.debug(f"Calculated supported_color_modes: {self._supported_color_modes}")
         _LOGGER.debug(f"Calculated temp range: {self._min_color_temp_kelvin} - {self._max_color_temp_kelvin}")
+        
+        # Notify callbacks when supported features change
+        self._notify_callbacks()
     
     def _reset_state(self) -> None:
         """Reset all state when no entities are available."""

@@ -59,29 +59,32 @@ class ProportionalLight(LightEntity):
         _LOGGER.info(f"  supported_color_modes={self.supported_color_modes}")
         _LOGGER.info(f"  supported_features={self.supported_features}")
         
-        # Also log all light entities that adaptive_lighting can see
-        light_entities = self.hass.states.async_entity_ids("light")
-        _LOGGER.info(f"All light domain entities visible to adaptive_lighting: {light_entities}")
-        
-        # Check if this entity is in the light domain entities list
-        if self.entity_id in light_entities:
-            _LOGGER.info(f"✅ This entity IS visible in light domain entity list")
-            
-            # Test the _supported_features function from adaptive_lighting 
-            state = self.hass.states.get(self.entity_id)
-            if state:
-                _LOGGER.info(f"Entity state attributes: {state.attributes}")
+        # Schedule a delayed check to verify adaptive_lighting compatibility
+        # (Can't check immediately as entity isn't fully registered yet)
+        def delayed_check():
+            light_entities = self.hass.states.async_entity_ids("light")
+            if self.entity_id in light_entities:
+                _LOGGER.info(f"✅ Entity {self.entity_id} IS visible in light domain")
                 
-                # Try to replicate adaptive_lighting's _supported_features logic
-                supported_features_attr = state.attributes.get("supported_features", 0)
-                supported_color_modes_attr = state.attributes.get("supported_color_modes", set())
-                _LOGGER.info(f"supported_features attr: {supported_features_attr}")
-                _LOGGER.info(f"supported_color_modes attr: {supported_color_modes_attr}")
+                # Test adaptive_lighting compatibility
+                state = self.hass.states.get(self.entity_id)
+                if state:
+                    supported_features_attr = state.attributes.get("supported_features", 0)
+                    supported_color_modes_attr = state.attributes.get("supported_color_modes", set())
+                    _LOGGER.info(f"Entity {self.entity_id} reports to HA:")
+                    _LOGGER.info(f"  supported_features: {supported_features_attr}")
+                    _LOGGER.info(f"  supported_color_modes: {supported_color_modes_attr}")
+                    
+                    # Test adaptive_lighting's _supported_features logic
+                    if supported_color_modes_attr:
+                        _LOGGER.info(f"✅ Entity should be compatible with adaptive_lighting")
+                    else:
+                        _LOGGER.error(f"❌ Entity has empty supported_color_modes - will be filtered out")
             else:
-                _LOGGER.error(f"Could not get state for {self.entity_id}")
-        else:
-            _LOGGER.error(f"❌ This entity is NOT visible in light domain entity list!")
-            _LOGGER.error(f"   This is why it won't show up in adaptive_lighting configuration!")
+                _LOGGER.error(f"❌ Entity {self.entity_id} NOT visible in light domain!")
+        
+        # Schedule the check for after the entity is fully registered
+        self.hass.loop.call_later(2.0, delayed_check)
     
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity is being removed from hass."""
@@ -90,6 +93,7 @@ class ProportionalLight(LightEntity):
     def _handle_coordinator_update(self) -> None:
         """Handle updates from the coordinator."""
         _LOGGER.debug(f"Entity {self._attr_name} received coordinator update - brightness: {self.coordinator.brightness}")
+        _LOGGER.debug(f"Entity {self._attr_name} coordinator now reports supported_color_modes: {self.coordinator.supported_color_modes}")
         self.async_write_ha_state()
     
     @property
@@ -123,7 +127,9 @@ class ProportionalLight(LightEntity):
     @property
     def supported_color_modes(self) -> set[ColorMode] | None:
         """Flag supported color modes."""
-        return self.coordinator.supported_color_modes
+        modes = self.coordinator.supported_color_modes
+        _LOGGER.debug(f"Entity {self._attr_name} supported_color_modes property called, returning: {modes}")
+        return modes
     
     @property
     def supported_features(self) -> int:
