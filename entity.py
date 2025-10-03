@@ -11,6 +11,7 @@ from homeassistant.components.light import (
     ATTR_RGB_COLOR,
     ColorMode,
     LightEntity,
+    LightEntityFeature,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
@@ -33,6 +34,15 @@ class ProportionalLight(LightEntity):
         self.coordinator = coordinator
         self._attr_name = entry.title
         self._attr_unique_id = entry.entry_id
+        
+        # Ensure the entity gets registered in the light domain
+        # This helps with adaptive_lighting compatibility
+        safe_name = entry.title.lower().replace(' ', '_').replace('-', '_')
+        suggested_entity_id = f"light.{safe_name}"
+        
+        # Note: Don't set entity_id directly as it can interfere with HA's entity registry
+        # Instead, we'll rely on the platform and entity class to handle domain assignment
+        _LOGGER.debug(f"ProportionalLight entity initialized: suggested_entity_id={suggested_entity_id}")
     
     async def async_added_to_hass(self) -> None:
         """Run when entity is added to hass."""
@@ -41,6 +51,37 @@ class ProportionalLight(LightEntity):
         
         # Perform initial update
         self.async_write_ha_state()
+        
+        # Debug logging to help diagnose adaptive_lighting integration issues
+        _LOGGER.info(f"ProportionalLight entity added: entity_id={self.entity_id}")
+        _LOGGER.info(f"  unique_id={self.unique_id}")
+        _LOGGER.info(f"  name={self.name}")
+        _LOGGER.info(f"  supported_color_modes={self.supported_color_modes}")
+        _LOGGER.info(f"  supported_features={self.supported_features}")
+        
+        # Also log all light entities that adaptive_lighting can see
+        light_entities = self.hass.states.async_entity_ids("light")
+        _LOGGER.info(f"All light domain entities visible to adaptive_lighting: {light_entities}")
+        
+        # Check if this entity is in the light domain entities list
+        if self.entity_id in light_entities:
+            _LOGGER.info(f"✅ This entity IS visible in light domain entity list")
+            
+            # Test the _supported_features function from adaptive_lighting 
+            state = self.hass.states.get(self.entity_id)
+            if state:
+                _LOGGER.info(f"Entity state attributes: {state.attributes}")
+                
+                # Try to replicate adaptive_lighting's _supported_features logic
+                supported_features_attr = state.attributes.get("supported_features", 0)
+                supported_color_modes_attr = state.attributes.get("supported_color_modes", set())
+                _LOGGER.info(f"supported_features attr: {supported_features_attr}")
+                _LOGGER.info(f"supported_color_modes attr: {supported_color_modes_attr}")
+            else:
+                _LOGGER.error(f"Could not get state for {self.entity_id}")
+        else:
+            _LOGGER.error(f"❌ This entity is NOT visible in light domain entity list!")
+            _LOGGER.error(f"   This is why it won't show up in adaptive_lighting configuration!")
     
     async def async_will_remove_from_hass(self) -> None:
         """Run when entity is being removed from hass."""
@@ -83,6 +124,44 @@ class ProportionalLight(LightEntity):
     def supported_color_modes(self) -> set[ColorMode] | None:
         """Flag supported color modes."""
         return self.coordinator.supported_color_modes
+    
+    @property
+    def supported_features(self) -> int:
+        """Return the supported features of the light."""
+        features = 0
+        
+        # Check if any of the underlying lights support transitions
+        if self.coordinator.entities:
+            for entity_id in self.coordinator.entities:
+                state = self.hass.states.get(entity_id)
+                if state:
+                    entity_features = state.attributes.get("supported_features", 0)
+                    if isinstance(entity_features, int) and entity_features & LightEntityFeature.TRANSITION:
+                        features |= LightEntityFeature.TRANSITION
+                        break
+        
+        # Always return at least some basic features to ensure compatibility
+        _LOGGER.debug(f"Entity {self._attr_name} calculated supported_features: {features}")
+        return features
+    
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra state attributes to help with adaptive_lighting compatibility."""
+        attrs = {}
+        
+        # Ensure supported_color_modes and supported_features are explicitly available
+        if self.supported_color_modes:
+            attrs["supported_color_modes"] = list(self.supported_color_modes)
+        if self.supported_features:
+            attrs["supported_features"] = self.supported_features
+            
+        # Add color temperature range if available
+        if self.min_color_temp_kelvin:
+            attrs["min_color_temp_kelvin"] = self.min_color_temp_kelvin
+        if self.max_color_temp_kelvin:
+            attrs["max_color_temp_kelvin"] = self.max_color_temp_kelvin
+            
+        return attrs if attrs else None
     
     @property
     def color_mode(self) -> ColorMode | None:

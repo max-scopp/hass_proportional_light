@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_ON
-from homeassistant.components.light import ATTR_BRIGHTNESS
+from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode
 
 from .const import LOGGER_NAME, CONF_ENTITIES, CONF_HUE_OFFSETS
 from .utils import (
@@ -43,7 +43,8 @@ class ProportionalLightCoordinator:
         self._brightness: int | None = None
         self._hs_color: tuple[float, float] | None = None
         self._color_temp_kelvin: int | None = None
-        self._supported_color_modes: set = set()
+        # Initialize with basic color modes to ensure adaptive_lighting compatibility
+        self._supported_color_modes: set = {ColorMode.BRIGHTNESS}
         self._min_color_temp_kelvin: int | None = None
         self._max_color_temp_kelvin: int | None = None
         
@@ -255,11 +256,21 @@ class ProportionalLightCoordinator:
             self._color_temp_kelvin = None
         
         # Update supported features from all entities
+        # Debug: Log what each entity reports for supported features
+        _LOGGER.debug("Checking supported features from member entities:")
+        for state in states:
+            supported_color_modes = state.attributes.get("supported_color_modes", "MISSING")
+            supported_features = state.attributes.get("supported_features", "MISSING")
+            _LOGGER.debug(f"  {state.entity_id}: color_modes={supported_color_modes}, features={supported_features}")
+        
         (
             self._supported_color_modes,
             self._min_color_temp_kelvin,
             self._max_color_temp_kelvin,
         ) = calculate_supported_features(states)
+        
+        _LOGGER.debug(f"Calculated supported_color_modes: {self._supported_color_modes}")
+        _LOGGER.debug(f"Calculated temp range: {self._min_color_temp_kelvin} - {self._max_color_temp_kelvin}")
     
     def _reset_state(self) -> None:
         """Reset all state when no entities are available."""

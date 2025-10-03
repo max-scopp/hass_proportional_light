@@ -288,14 +288,34 @@ def calculate_average_color(
 
 def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], int | None, int | None]:
     """Calculate supported color modes and temperature ranges from all entities."""
+    import logging
+    
+    _LOGGER = logging.getLogger(__name__)
     modes = set()
     min_kelvin_values = []
     max_kelvin_values = []
     
+    _LOGGER.debug(f"calculate_supported_features called with {len(states)} states")
+    
     for s in states:
         # Collect supported color modes
-        if s.attributes.get("supported_color_modes"):
-            modes.update(s.attributes["supported_color_modes"])
+        entity_modes = s.attributes.get("supported_color_modes")
+        _LOGGER.debug(f"Entity {s.entity_id} reports supported_color_modes: {entity_modes}")
+        
+        if entity_modes:
+            modes.update(entity_modes)
+        else:
+            # Fallback: try to infer from state attributes
+            _LOGGER.debug(f"No supported_color_modes found, inferring from attributes")
+            if s.attributes.get("hs_color") is not None:
+                modes.add(ColorMode.HS)
+                _LOGGER.debug(f"  Added HS mode (has hs_color)")
+            if s.attributes.get("color_temp_kelvin") is not None or s.attributes.get("color_temp") is not None:
+                modes.add(ColorMode.COLOR_TEMP)
+                _LOGGER.debug(f"  Added COLOR_TEMP mode (has color_temp)")
+            if s.attributes.get("brightness") is not None or s.state == "on":
+                modes.add(ColorMode.BRIGHTNESS)
+                _LOGGER.debug(f"  Added BRIGHTNESS mode (has brightness or is on)")
         
         # Collect color temperature ranges
         if s.attributes.get("min_color_temp_kelvin"):
@@ -307,7 +327,10 @@ def calculate_supported_features(states: list[State]) -> tuple[set[ColorMode], i
     if modes and ColorMode.ONOFF in modes and len(modes) > 1:
         modes.remove(ColorMode.ONOFF)
     if not modes:
+        _LOGGER.debug("No color modes found, defaulting to BRIGHTNESS")
         modes = {ColorMode.BRIGHTNESS}
+    
+    _LOGGER.debug(f"Final calculated modes: {modes}")
     
     # Set temperature ranges (use the intersection of all ranges)
     min_kelvin = max(min_kelvin_values) if min_kelvin_values else None
