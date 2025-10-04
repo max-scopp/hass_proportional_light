@@ -2,7 +2,7 @@
 
 > A Home Assistant custom component that makes managing your lights more natural. Works just like Apple Music's multi-room controls.
 
-![Demo](readme/demo.MP4)
+https://github.com/user-attachments/assets/97c36751-1fad-479d-8a93-48fb866bdf43
 
 ## Features
 
