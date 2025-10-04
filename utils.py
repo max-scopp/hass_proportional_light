@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any
 import logging
+import colorsys
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -376,9 +377,47 @@ def add_color_attributes(
         else:
             service_data[ATTR_RGB_COLOR] = kwargs[ATTR_RGB_COLOR]
     elif ATTR_RGBW_COLOR in kwargs:
-        service_data[ATTR_RGBW_COLOR] = kwargs[ATTR_RGBW_COLOR]
+        if entity_id in hue_offsets:
+            # Apply hue offset by converting RGBW -> RGB -> HS -> offset -> RGB -> RGBW
+            r, g, b, w = kwargs[ATTR_RGBW_COLOR]
+            # Use RGB components for hue calculation (ignore white channel for hue)
+            if r + g + b > 0:  # Only apply offset if there's actual color (not just white)
+                h_norm, s_norm, v_norm = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
+                h = h_norm * 360.0
+                offset_h = (h + hue_offsets[entity_id]) % 360
+                offset_h_norm = offset_h / 360.0
+                
+                # Convert back to RGB while preserving brightness
+                r_new, g_new, b_new = colorsys.hsv_to_rgb(offset_h_norm, s_norm, v_norm)
+                service_data[ATTR_RGBW_COLOR] = (int(r_new * 255), int(g_new * 255), int(b_new * 255), w)
+                _LOGGER.debug(f"Applied hue offset {hue_offsets[entity_id]}° to {entity_id}: RGBW({r},{g},{b},{w}) -> RGBW({int(r_new * 255)},{int(g_new * 255)},{int(b_new * 255)},{w})")
+            else:
+                # Pure white light - no hue to offset
+                service_data[ATTR_RGBW_COLOR] = kwargs[ATTR_RGBW_COLOR]
+                _LOGGER.debug(f"Skipping hue offset for {entity_id}: RGBW({r},{g},{b},{w}) is pure white")
+        else:
+            service_data[ATTR_RGBW_COLOR] = kwargs[ATTR_RGBW_COLOR]
     elif ATTR_RGBWW_COLOR in kwargs:
-        service_data[ATTR_RGBWW_COLOR] = kwargs[ATTR_RGBWW_COLOR]
+        if entity_id in hue_offsets:
+            # Apply hue offset by converting RGBWW -> RGB -> HS -> offset -> RGB -> RGBWW
+            r, g, b, cw, ww = kwargs[ATTR_RGBWW_COLOR]
+            # Use RGB components for hue calculation (ignore white channels for hue)
+            if r + g + b > 0:  # Only apply offset if there's actual color (not just white)
+                h_norm, s_norm, v_norm = colorsys.rgb_to_hsv(r/255.0, g/255.0, b/255.0)
+                h = h_norm * 360.0
+                offset_h = (h + hue_offsets[entity_id]) % 360
+                offset_h_norm = offset_h / 360.0
+                
+                # Convert back to RGB while preserving brightness and white channels
+                r_new, g_new, b_new = colorsys.hsv_to_rgb(offset_h_norm, s_norm, v_norm)
+                service_data[ATTR_RGBWW_COLOR] = (int(r_new * 255), int(g_new * 255), int(b_new * 255), cw, ww)
+                _LOGGER.debug(f"Applied hue offset {hue_offsets[entity_id]}° to {entity_id}: RGBWW({r},{g},{b},{cw},{ww}) -> RGBWW({int(r_new * 255)},{int(g_new * 255)},{int(b_new * 255)},{cw},{ww})")
+            else:
+                # Pure white light - no hue to offset
+                service_data[ATTR_RGBWW_COLOR] = kwargs[ATTR_RGBWW_COLOR]
+                _LOGGER.debug(f"Skipping hue offset for {entity_id}: RGBWW({r},{g},{b},{cw},{ww}) is pure white")
+        else:
+            service_data[ATTR_RGBWW_COLOR] = kwargs[ATTR_RGBWW_COLOR]
     elif ATTR_XY_COLOR in kwargs:
         if entity_id in hue_offsets:
             # Apply hue offset by converting XY -> HS -> offset -> XY
