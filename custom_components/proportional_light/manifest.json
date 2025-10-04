@@ -3,11 +3,13 @@
 	"name": "Proportional Light",
 	"version": "0.2.0",
 	"documentation": "https://github.com/max-scopp/hass_proportional_light",
+	"issue_tracker": "https://github.com/max-scopp/hass_proportional_light/issues",
 	"requirements": [],
-	"dependencies": [],
+	"dependencies": ["light"],
+	"iot_class": "calculated",
+	"integration_type": "device",
 	"codeowners": ["@max-scopp"],
 	"config_flow": true,
-	"integration_type": "device",
 	"logos": {
 		"small": "icons/icon.png",
 		"large": "icons/logo.png"
