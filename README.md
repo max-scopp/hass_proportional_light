@@ -1,8 +1,10 @@
 # Proportional Light
 
-> A Home Assistant custom component that makes managing your lights more natural.
+> A Home Assistant custom component that makes managing your lights more natural. Works just like Apple Music's multi-room controls.
 
-Control all your lights as a group while keeping their unique personalities. Just like Apple Music's multi-room controls, each light stays distinct while working in harmony.
+<video width="576" height="657" autoplay loop muted>
+  <source src="readme/demo.MP4" type="video/mp4">
+</video>
 
 ## Features
 
