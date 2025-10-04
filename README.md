@@ -11,6 +11,28 @@ https://github.com/user-attachments/assets/97c36751-1fad-479d-8a93-48fb866bdf43
 
 ## Quick Setup
 
-1. Add your lights to the integration.
-2. Configure per-light hue offsets (-180° to +180°).
-3. Use the group color picker to enjoy natural, dynamic lighting.
+Install via HACS (recommended)
+
+1. In Home Assistant open HACS.
+2. Click the three-dots menu (top right) -> "Custom repositories".
+3. In the "Add repository" dialog paste the repository URL:
+
+	```bash
+    https://github.com/max-scopp/hass_proportional_light
+    ```
+
+	Choose Category: "Integration" and click "Add".
+4. In HACS go to "Integrations" and search for "Proportional Light". Click "Install".
+5. After installation restart Home Assistant.
+
+Add the integration
+
+1. In Home Assistant go to Settings -> Devices & Services -> Add Integration.
+2. Search for "Proportional Light" and follow the on-screen steps.
+3. Add the lights you want to manage and optionally set per-light hue offsets (-180° to +180°).
+
+Manual install (alternative)
+
+1. Copy the `proportional_light` folder into your `custom_components` directory.
+2. Restart Home Assistant.
+3. Add the integration from Settings -> Devices & Services as above.
