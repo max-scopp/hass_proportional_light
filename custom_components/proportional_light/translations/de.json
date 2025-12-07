@@ -35,6 +35,11 @@
 				"title": "Geben Sie Ihren Lichtern Persönlichkeit",
 				"description": "{info}",
 				"data": {}
+			},
+			"default_proportions": {
+				"title": "Standard-Helligkeitsverhältnisse einstellen",
+				"description": "{info}",
+				"data": {}
 			}
 		}
 	},

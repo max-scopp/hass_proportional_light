@@ -9,6 +9,7 @@ DOMAIN = "proportional_light"
 
 CONF_PROPORTION_RESET = "proportion_reset_mode"
 CONF_RESET_TIMEOUT = "proportion_reset_timeout"
+CONF_DEFAULT_PROPORTIONS = "default_proportions"
 
 PROPORTION_RESET_NEVER = "never"
 PROPORTION_RESET_ON_OFF = "on_off"
@@ -149,17 +150,9 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
                     if _is_colorable_entity(self.hass, entity_id):
                         new_hue_offsets[entity_id] = float(value)
             
-            # Update the config entry data
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    "entities": self._entities,
-                    "hue_offsets": new_hue_offsets,
-                    CONF_PROPORTION_RESET: self._proportion_reset,
-                    CONF_RESET_TIMEOUT: self._reset_timeout,
-                }
-            )
-            return self.async_create_entry(title="", data={})
+            # Move to default proportions step
+            self._hue_offsets = new_hue_offsets
+            return await self.async_step_default_proportions()
 
         # Build hue offset schema
         hue_offset_schema = {}
@@ -180,16 +173,8 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
 
         # If no colorable entities, skip this step
         if not hue_offset_schema:
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    "entities": self._entities,
-                    "hue_offsets": {},
-                    CONF_PROPORTION_RESET: self._proportion_reset,
-                    CONF_RESET_TIMEOUT: self._reset_timeout,
-                }
-            )
-            return self.async_create_entry(title="", data={})
+            self._hue_offsets = {}
+            return await self.async_step_default_proportions()
 
         schema = vol.Schema(hue_offset_schema)
         
@@ -199,5 +184,64 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
             errors=errors,
             description_placeholders={
                 "info": "Optional: Add personality to your lights with per-light hue adjustments. Leave at 0° for no adjustment."
+            }
+        )
+
+    async def async_step_default_proportions(self, user_input=None):
+        """Step 4: Configure default brightness proportions (optional)"""
+        errors = {}
+        default_proportions = self._config_entry.data.get(CONF_DEFAULT_PROPORTIONS, {})
+
+        if user_input is not None:
+            # Extract default proportions from user input
+            new_default_proportions = {}
+            for key, value in user_input.items():
+                if key.startswith("default_proportion_"):
+                    entity_id = key.replace("default_proportion_", "")
+                    if entity_id in self._entities:
+                        # Store as percentage (0-100), will be normalized later
+                        new_default_proportions[entity_id] = float(value) / 100.0
+            
+            # Update the config entry data
+            self.hass.config_entries.async_update_entry(
+                self._config_entry,
+                data={
+                    "entities": self._entities,
+                    "hue_offsets": self._hue_offsets,
+                    CONF_PROPORTION_RESET: self._proportion_reset,
+                    CONF_RESET_TIMEOUT: self._reset_timeout,
+                    CONF_DEFAULT_PROPORTIONS: new_default_proportions,
+                }
+            )
+            return self.async_create_entry(title="", data={})
+
+        # Build default proportions schema for all entities
+        default_proportion_schema = {}
+        for entity_id in self._entities:
+            state = self.hass.states.get(entity_id)
+            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
+            field_name = f"default_proportion_{entity_id}"
+            
+            # Get the current value (stored as decimal, display as percentage)
+            current_value = (default_proportions.get(entity_id, 0.0) * 100) if entity_id in default_proportions else 50
+            
+            default_proportion_schema[vol.Optional(field_name, default=current_value)] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=0.0,
+                    max=100.0,
+                    step=5.0,
+                    mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="%"
+                )
+            )
+
+        schema = vol.Schema(default_proportion_schema)
+        
+        return self.async_show_form(
+            step_id="default_proportions",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "info": "Optional: Set default brightness proportions. When lights turn on with a requested brightness after proportions have reset, these proportions will be applied. Set equal percentages for all lights to turn them all on at the same brightness. Leave unchanged to use automatic proportions."
             }
         )

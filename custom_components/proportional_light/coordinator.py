@@ -14,6 +14,7 @@ from .const import LOGGER_NAME, CONF_ENTITIES, CONF_HUE_OFFSETS
 from .config_flow import (
     CONF_PROPORTION_RESET,
     CONF_RESET_TIMEOUT,
+    CONF_DEFAULT_PROPORTIONS,
     PROPORTION_RESET_NEVER,
     PROPORTION_RESET_ON_OFF,
     PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
@@ -43,11 +44,13 @@ class ProportionalLightCoordinator:
         self._hue_offsets: dict[str, float] = entry.data.get(CONF_HUE_OFFSETS, {})
         self._proportion_reset_mode: str = entry.data.get(CONF_PROPORTION_RESET, PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS)
         self._reset_timeout_seconds: int = entry.data.get(CONF_RESET_TIMEOUT, 28800)
+        self._default_proportions: dict[str, float] = entry.data.get(CONF_DEFAULT_PROPORTIONS, {})
         
         _LOGGER.debug(f"Coordinator initialized with entities: {self._entities}")
         _LOGGER.debug(f"Coordinator initialized with hue_offsets: {self._hue_offsets}")
         _LOGGER.debug(f"Coordinator proportion reset mode: {self._proportion_reset_mode}")
         _LOGGER.debug(f"Coordinator reset timeout: {self._reset_timeout_seconds}s")
+        _LOGGER.debug(f"Coordinator default proportions: {self._default_proportions}")
         
         self._update_callbacks: list[Callable[[], None]] = []
         self._unsub_update_listener = None
@@ -111,6 +114,11 @@ class ProportionalLightCoordinator:
         return self._reset_timeout_seconds
     
     @property
+    def default_proportions(self) -> dict[str, float]:
+        """Return the default proportions dictionary."""
+        return self._default_proportions
+    
+    @property
     def is_on(self) -> bool:
         """Return if the group is on."""
         return self._is_on
@@ -125,8 +133,9 @@ class ProportionalLightCoordinator:
         """Return the HS color for the group UI."""
         # Show group target color if we have one and last command was color (and not external change)
         if self._group_target_color and self._last_command_was_color and not self._has_external_color_change:
-            # Apply the average hue offset when displaying the user-set color
-            return apply_hue_offset_to_color(self._group_target_color, self._hue_offsets)
+            # Return the user-requested color WITHOUT offsets
+            # Offsets are only applied to individual lights, not displayed in the UI
+            return self._group_target_color
         # Otherwise show averaged color from lights
         return self._hs_color
     

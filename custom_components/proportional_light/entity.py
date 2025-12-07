@@ -304,15 +304,49 @@ class ProportionalLight(LightEntity):
     
     async def _apply_to_on_lights(self, on_states, target_brightness: int, **kwargs) -> None:
         """Apply settings to currently ON lights with proportional brightness scaling."""
-        # Calculate proportional brightness for each light using stored proportions
-        proportional_brightnesses, updated_proportions = calculate_proportional_brightness(
-            on_states, target_brightness, self.coordinator.brightness_proportions
-        )
+        # Priority system:
+        # 1. Use dynamic (learned) proportions if they exist
+        # 2. Fall back to default proportions if dynamic were reset (timed out)
+        # 3. Use equal brightness if neither exists
+        dynamic_proportions = self.coordinator.brightness_proportions
+        default_proportions = self.coordinator.default_proportions
         
-        # Update coordinator with new proportions (for when we're setting the brightness)
-        self.coordinator._brightness_proportions.update(updated_proportions)
+        # Prefer dynamic proportions if they exist (they represent user's custom setup that hasn't timed out)
+        # Only use default proportions if dynamic ones are empty (timed out or reset)
+        if dynamic_proportions:
+            # Use dynamic proportions - calculate from stored values
+            proportional_brightnesses, updated_proportions = calculate_proportional_brightness(
+                on_states, target_brightness, dynamic_proportions
+            )
+            
+            # Update coordinator with new proportions (for when we're setting the brightness)
+            self.coordinator._brightness_proportions.update(updated_proportions)
+            
+            _LOGGER.debug(f"Applying dynamic proportional brightness (user custom): target_avg={target_brightness}")
+        elif default_proportions:
+            # Use default proportions only if dynamic proportions are empty/timed out
+            proportional_brightnesses = {}
+            max_proportion = max(default_proportions.values()) if default_proportions else 1.0
+            
+            for state in on_states:
+                entity_id = state.entity_id
+                if entity_id in default_proportions:
+                    # Scale default proportion to target brightness
+                    proportion = default_proportions[entity_id]
+                    # Ensure the light with max proportion reaches target brightness
+                    if max_proportion > 0:
+                        proportional_brightnesses[entity_id] = max(1, int(target_brightness * proportion / max_proportion))
+                    else:
+                        proportional_brightnesses[entity_id] = target_brightness
+                else:
+                    proportional_brightnesses[entity_id] = target_brightness
+            
+            _LOGGER.debug(f"Applying default proportional brightness (custom timed out): target_avg={target_brightness}")
+        else:
+            # No proportions at all - apply equal brightness to all
+            proportional_brightnesses = {state.entity_id: target_brightness for state in on_states}
+            _LOGGER.debug(f"No proportions configured, applying equal brightness: target_avg={target_brightness}")
         
-        _LOGGER.debug(f"Applying proportional brightness: target_avg={target_brightness}")
         for entity_id, brightness in proportional_brightnesses.items():
             _LOGGER.debug(f"  {entity_id}: {brightness}")
         

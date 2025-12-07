@@ -35,6 +35,11 @@
 				"title": "Add personality to your lights",
 				"description": "{info}",
 				"data": {}
+			},
+			"default_proportions": {
+				"title": "Set default brightness proportions",
+				"description": "{info}",
+				"data": {}
 			}
 		}
 	},

@@ -13,6 +13,7 @@ https://github.com/user-attachments/assets/97c36751-1fad-479d-8a93-48fb866bdf43
   - Keeps natural brightness relationships when you toggle lights on/off
   - Works seamlessly with automation (e.g., Ambient Light) to reset proportions when needed
   - Configurable reset modes to suit your workflow
+- **Default Proportions**: Optionally set fallback brightness proportions that apply when custom proportions have timed out
 - **Adaptive Lighting Compatible**: Fully supports Home Assistant's adaptive_lighting integration.
 - **YAML-free Configuration**: User-friendly UI for setup without editing YAML files.
 
@@ -46,14 +47,14 @@ Manual install (alternative)
 
 ## Configuration
 
-After adding the integration, you can configure it further via the Options menu:
+After adding the integration, you can configure it via the Options menu:
 
 ### Brightness Proportions Reset
 
 Control how brightness proportions are managed:
 
 - **Never reset**: Keeps proportions indefinitely (good for manual light groups)
-- **Reset on turn off**: Clears proportions when the group is turned off (default for most use cases)
+- **Reset on turn off**: Clears proportions when the group is turned off
 - **Reset when turned on with specific brightness**: Only resets when turned on with an explicit brightness (e.g., from Ambient Light automation)
 - **Reset on both**: Combination of the above
 
@@ -63,10 +64,23 @@ When lights are off, automatically reset proportions after a specified duration 
 
 Set to `0` to disable timeout-based resets. This is useful when combined with "Reset when turned on with specific brightness" to allow proportions to persist across short off periods but reset after extended downtime.
 
-**Example Workflow with Ambient Light**:
-- Mode: "Reset when turned on with specific brightness"
-- Timeout: 28800 (8 hours)
-- Result: When Ambient Light automation turns the lights on at a specific brightness, proportions reset. When you manually toggle them, proportions are preserved.
+### Default Proportions (Optional)
+
+Set fallback brightness proportions that apply when custom proportions have timed out. These serve as a baseline when you've turned lights off for an extended period:
+
+- **Example**: Light A at 100%, Light B at 50% means Light A is always twice as bright as Light B
+- **Use case**: Ensure consistent lighting when automation like Ambient Light resets proportions after timeout
+- **Behavior**: Leave all at default to use dynamic proportions exclusively (learns from manual adjustments)
+
+**Workflow with Ambient Light + Default Proportions**:
+1. Set Reset mode to "Reset when turned on with specific brightness"
+2. Configure Default Proportions (e.g., 80%, 60%, 40% for three lights)
+3. When Ambient Light turns on lights at specific brightness → proportions reset then apply default fallback values
+4. When you manually toggle lights → proportions evolve naturally
+
+### Hue Offsets
+
+Add per-light color adjustments (-180° to +180°) to fine-tune the group's average color.
 
 ## How It Works
 
