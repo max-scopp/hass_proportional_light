@@ -110,19 +110,18 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
         
         # Add hue offset section if there are colorable entities
         if hue_offset_schema:
-            # Add separator and then color offset fields
-            schema_dict[vol.Optional("hue_offsets_separator")] = selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[],
-                    disabled=True,
-                )
-            )
             schema_dict.update(hue_offset_schema)
         
         schema = vol.Schema(schema_dict)
         
+        # Add note about color offsets requiring config re-open for new entities
+        description_placeholders = {
+            "color_offset_note": "Color offsets will appear after reopening this page for newly added/removed lights."
+        }
+        
         return self.async_show_form(
             step_id="options", 
             data_schema=schema, 
-            errors=errors
+            errors=errors,
+            description_placeholders=description_placeholders
         )

@@ -14,14 +14,12 @@
 		"step": {
 			"options": {
 				"title": "⚙️ Configure Proportional Light",
-				"description": "Choose lights for this group.",
+				"description": "Choose lights for this group. {color_offset_note}",
 				"data": {
-					"entities": "🔗 Light Selection",
-					"hue_offsets_separator": "🎨 Color Offsets — Reopening this page will show settings for newly added/removed lights"
+					"entities": "🔗 Light Selection"
 				},
 				"data_description": {
-					"entities": "Choose which lights to include in this proportional group",
-					"hue_offsets_separator": ""
+					"entities": "Choose which lights to include in this proportional group"
 				}
 			}
 		}
