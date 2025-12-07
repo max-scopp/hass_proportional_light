@@ -7,7 +7,14 @@ https://github.com/user-attachments/assets/97c36751-1fad-479d-8a93-48fb866bdf43
 ## Features
 
 - **Proportional Brightness**: Maintain natural brightness relationships between lights while scaling the group.
-- **Hue Offsets**: Add personality to your lights with per-light hue adjustments.
+- **Hue Offsets**: Add personality to your lights with per-light hue adjustments (-180° to +180°).
+- **Color Averaging**: Automatically averages colors and temperatures from all member lights.
+- **Smart Brightness Proportions**: 
+  - Keeps natural brightness relationships when you toggle lights on/off
+  - Works seamlessly with automation (e.g., Ambient Light) to reset proportions when needed
+  - Configurable reset modes to suit your workflow
+- **Adaptive Lighting Compatible**: Fully supports Home Assistant's adaptive_lighting integration.
+- **YAML-free Configuration**: User-friendly UI for setup without editing YAML files.
 
 ## Quick Setup
 
@@ -36,6 +43,30 @@ Manual install (alternative)
 1. Copy the `proportional_light` folder into your `custom_components` directory.
 2. Restart Home Assistant.
 3. Add the integration from Settings -> Devices & Services as above.
+
+## Configuration
+
+After adding the integration, you can configure it further via the Options menu:
+
+### Brightness Proportions Reset
+
+Control how brightness proportions are managed:
+
+- **Never reset**: Keeps proportions indefinitely (good for manual light groups)
+- **Reset on turn off**: Clears proportions when the group is turned off (default for most use cases)
+- **Reset when turned on with specific brightness**: Only resets when turned on with an explicit brightness (e.g., from Ambient Light automation)
+- **Reset on both**: Combination of the above
+
+### Reset Timeout
+
+When lights are off, automatically reset proportions after a specified duration (default: 8 hours).
+
+Set to `0` to disable timeout-based resets. This is useful when combined with "Reset when turned on with specific brightness" to allow proportions to persist across short off periods but reset after extended downtime.
+
+**Example Workflow with Ambient Light**:
+- Mode: "Reset when turned on with specific brightness"
+- Timeout: 28800 (8 hours)
+- Result: When Ambient Light automation turns the lights on at a specific brightness, proportions reset. When you manually toggle them, proportions are preserved.
 
 ## How It Works
 

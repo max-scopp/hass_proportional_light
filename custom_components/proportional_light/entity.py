@@ -213,10 +213,27 @@ class ProportionalLight(LightEntity):
         # Extract brightness and filter it out of kwargs to avoid conflicts
         target_brightness = kwargs.pop(ATTR_BRIGHTNESS, None)
         
+        # Determine if this is a specific brightness request or just turn on
+        explicit_brightness_requested = target_brightness is not None
+        was_off_before = not self.coordinator.is_on
+        
         # If no brightness specified and we have a saved brightness from before turn_off, restore it
         if target_brightness is None and self.coordinator.last_brightness_before_off is not None:
             target_brightness = self.coordinator.last_brightness_before_off
             _LOGGER.debug(f"Restoring brightness from before off: {target_brightness}")
+        
+        # Handle proportion reset on turn on with specific brightness
+        # Only reset if lights were off and a specific brightness was requested
+        if (
+            was_off_before
+            and explicit_brightness_requested
+            and self.coordinator.should_reset_on_specific_brightness()
+        ):
+            _LOGGER.debug("Resetting proportions: lights turned on with specific brightness")
+            self.coordinator.reset_proportions()
+        else:
+            # Cancel timeout if lights are being turned on (keep proportions)
+            self.coordinator.cancel_timeout_reset()
         
         # Store group target colors for Apple Music-style behavior
         if ATTR_HS_COLOR in kwargs:
@@ -253,6 +270,15 @@ class ProportionalLight(LightEntity):
         """Turn off all lights in the group."""
         # Save brightness state before turning off
         self.coordinator.save_brightness_before_off()
+        
+        # Handle proportion reset on turn off
+        if self.coordinator.should_reset_on_turn_off():
+            _LOGGER.debug("Resetting proportions on turn off")
+            self.coordinator.reset_proportions()
+        
+        # Schedule timeout-based reset if enabled
+        if self.coordinator.should_reset_on_turn_off():
+            self.coordinator.schedule_timeout_reset()
         
         if self.coordinator.entities:
             await self.hass.services.async_call(

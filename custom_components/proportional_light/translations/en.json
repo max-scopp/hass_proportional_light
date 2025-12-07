@@ -12,15 +12,29 @@
 	},
 	"options": {
 		"step": {
-			"options": {
-				"title": "⚙️ Configure Proportional Light",
-				"description": "Choose lights for this group. {color_offset_note}",
+			"lights": {
+				"title": "🔗 Light Selection",
+				"description": "{note}",
 				"data": {
-					"entities": "🔗 Light Selection"
+					"entities": "Lights"
+				}
+			},
+			"proportions": {
+				"title": "📊 Brightness Proportions",
+				"description": "{info}",
+				"data": {
+					"proportion_reset_mode": "Reset mode",
+					"proportion_reset_timeout": "Timeout (seconds)"
 				},
 				"data_description": {
-					"entities": "Choose which lights to include in this proportional group"
+					"proportion_reset_mode": "Never: keep proportions always | On turn off: reset when turned off | On specific brightness: reset when turned on with explicit brightness (e.g., Ambient Light) | On both: combination",
+					"proportion_reset_timeout": "Auto-reset after this time when lights are off (0 = disabled)"
 				}
+			},
+			"colors": {
+				"title": "🎨 Color Offsets",
+				"description": "{info}",
+				"data": {}
 			}
 		}
 	},

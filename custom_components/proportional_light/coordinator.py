@@ -11,6 +11,14 @@ from homeassistant.const import STATE_ON
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode
 
 from .const import LOGGER_NAME, CONF_ENTITIES, CONF_HUE_OFFSETS
+from .config_flow import (
+    CONF_PROPORTION_RESET,
+    CONF_RESET_TIMEOUT,
+    PROPORTION_RESET_NEVER,
+    PROPORTION_RESET_ON_OFF,
+    PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+    PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+)
 from .utils import (
     filter_valid_states,
     get_on_states,
@@ -33,8 +41,14 @@ class ProportionalLightCoordinator:
         self.entry = entry
         self._entities: list[str] = entry.data.get(CONF_ENTITIES, [])
         self._hue_offsets: dict[str, float] = entry.data.get(CONF_HUE_OFFSETS, {})
+        self._proportion_reset_mode: str = entry.data.get(CONF_PROPORTION_RESET, PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS)
+        self._reset_timeout_seconds: int = entry.data.get(CONF_RESET_TIMEOUT, 28800)
+        
         _LOGGER.debug(f"Coordinator initialized with entities: {self._entities}")
         _LOGGER.debug(f"Coordinator initialized with hue_offsets: {self._hue_offsets}")
+        _LOGGER.debug(f"Coordinator proportion reset mode: {self._proportion_reset_mode}")
+        _LOGGER.debug(f"Coordinator reset timeout: {self._reset_timeout_seconds}s")
+        
         self._update_callbacks: list[Callable[[], None]] = []
         self._unsub_update_listener = None
         self._unsub_state_listener = None
@@ -61,6 +75,10 @@ class ProportionalLightCoordinator:
         
         # Store brightness before turning off to restore when turning back on
         self._last_brightness_before_off: int | None = None
+        
+        # Timeout tracking for automatic proportion reset
+        self._last_turn_off_time: float | None = None
+        self._unsub_timeout = None
     
     @property
     def entities(self) -> list[str]:
@@ -81,6 +99,16 @@ class ProportionalLightCoordinator:
     def last_brightness_before_off(self) -> int | None:
         """Return the last brightness before turning off."""
         return self._last_brightness_before_off
+    
+    @property
+    def proportion_reset_mode(self) -> str:
+        """Return the proportion reset mode."""
+        return self._proportion_reset_mode
+    
+    @property
+    def reset_timeout_seconds(self) -> int:
+        """Return the reset timeout in seconds."""
+        return self._reset_timeout_seconds
     
     @property
     def is_on(self) -> bool:
@@ -148,6 +176,8 @@ class ProportionalLightCoordinator:
             self._unsub_state_listener()
         if self._unsub_update_listener:
             self._unsub_update_listener()
+        if self._unsub_timeout:
+            self._unsub_timeout()
     
     def add_update_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when state updates."""
@@ -369,6 +399,56 @@ class ProportionalLightCoordinator:
             _LOGGER.debug("Auto-clearing group targets after command delay")
             self.clear_group_targets()
             self._notify_callbacks()
+    
+    def reset_proportions(self) -> None:
+        """Reset brightness proportions."""
+        self._brightness_proportions = {}
+        _LOGGER.debug("Brightness proportions reset")
+    
+    def should_reset_on_turn_off(self) -> bool:
+        """Check if proportions should be reset on turn off."""
+        return self._proportion_reset_mode in (
+            PROPORTION_RESET_ON_OFF,
+            PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+        )
+    
+    def should_reset_on_specific_brightness(self) -> bool:
+        """Check if proportions should be reset when turned on with specific brightness."""
+        return self._proportion_reset_mode in (
+            PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+            PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+        )
+    
+    def schedule_timeout_reset(self) -> None:
+        """Schedule proportions to be reset after timeout."""
+        if self._reset_timeout_seconds <= 0:
+            return
+        
+        # Cancel any existing timeout
+        if self._unsub_timeout:
+            self._unsub_timeout()
+        
+        from homeassistant.helpers.event import async_call_later
+        
+        async def _handle_timeout(_now):
+            _LOGGER.debug(f"Proportion reset timeout triggered after {self._reset_timeout_seconds}s")
+            self.reset_proportions()
+            self._unsub_timeout = None
+            self._notify_callbacks()
+        
+        self._unsub_timeout = async_call_later(
+            self.hass,
+            self._reset_timeout_seconds,
+            _handle_timeout
+        )
+        _LOGGER.debug(f"Scheduled proportion reset after {self._reset_timeout_seconds}s")
+    
+    def cancel_timeout_reset(self) -> None:
+        """Cancel any scheduled proportion reset."""
+        if self._unsub_timeout:
+            self._unsub_timeout()
+            self._unsub_timeout = None
+            _LOGGER.debug("Cancelled scheduled proportion reset")
     
     def _notify_callbacks(self) -> None:
         """Notify all registered callbacks of state changes."""

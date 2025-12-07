@@ -12,15 +12,29 @@
 	},
 	"options": {
 		"step": {
-			"options": {
-				"title": "⚙️ Proportionales Licht konfigurieren",
-				"description": "Lichter für diese Gruppe auswählen. {color_offset_note}",
+			"lights": {
+				"title": "🔗 Lichtauswahl",
+				"description": "{note}",
 				"data": {
-					"entities": "🔗 Lichtauswahl"
+					"entities": "Lichter"
+				}
+			},
+			"proportions": {
+				"title": "📊 Helligkeitsverhältnisse",
+				"description": "{info}",
+				"data": {
+					"proportion_reset_mode": "Rücksetzmodus",
+					"proportion_reset_timeout": "Timeout (Sekunden)"
 				},
 				"data_description": {
-					"entities": "Wähle aus, welche Lichter in diese proportionale Gruppe aufgenommen werden sollen"
+					"proportion_reset_mode": "Nie: Verhältnisse immer beibehalten | Beim Ausschalten: beim Ausschalten zurücksetzen | Bei spezifischer Helligkeit: beim Einschalten mit expliziter Helligkeit zurücksetzen (z.B. Ambient Light) | Bei beiden: Kombination",
+					"proportion_reset_timeout": "Automatisch zurücksetzen nach dieser Zeit, wenn Lichter aus sind (0 = deaktiviert)"
 				}
+			},
+			"colors": {
+				"title": "🎨 Farbton-Offsets",
+				"description": "{info}",
+				"data": {}
 			}
 		}
 	},
