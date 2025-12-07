@@ -14,12 +14,14 @@
 		"step": {
 			"options": {
 				"title": "⚙️ Proportionales Licht konfigurieren",
-				"description": "Lichter auswählen und Farbton-Offsets einstellen, um Persönlichkeit hinzuzufügen. {info}",
+				"description": "Lichter für diese Gruppe auswählen.",
 				"data": {
-					"entities": "🔗 Lichtauswahl"
+					"entities": "🔗 Lichtauswahl",
+					"hue_offsets_separator": "🎨 Farbton-Offsets — Diese Seite neu öffnen zeigt Einstellungen für neu hinzugefügte/entfernte Lichter"
 				},
 				"data_description": {
-					"entities": "Wähle aus, welche Lichter in diese proportionale Gruppe aufgenommen werden sollen"
+					"entities": "Wähle aus, welche Lichter in diese proportionale Gruppe aufgenommen werden sollen",
+					"hue_offsets_separator": ""
 				}
 			}
 		}

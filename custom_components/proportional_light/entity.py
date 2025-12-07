@@ -213,6 +213,11 @@ class ProportionalLight(LightEntity):
         # Extract brightness and filter it out of kwargs to avoid conflicts
         target_brightness = kwargs.pop(ATTR_BRIGHTNESS, None)
         
+        # If no brightness specified and we have a saved brightness from before turn_off, restore it
+        if target_brightness is None and self.coordinator.last_brightness_before_off is not None:
+            target_brightness = self.coordinator.last_brightness_before_off
+            _LOGGER.debug(f"Restoring brightness from before off: {target_brightness}")
+        
         # Store group target colors for Apple Music-style behavior
         if ATTR_HS_COLOR in kwargs:
             self.coordinator.set_group_target_color(kwargs[ATTR_HS_COLOR])
@@ -238,11 +243,17 @@ class ProportionalLight(LightEntity):
             brightness = target_brightness or self.coordinator.brightness or 255
             await self._apply_to_on_lights(on_states, brightness, **kwargs)
         
+        # Clear the saved brightness after restoring it
+        self.coordinator.clear_brightness_before_off()
+        
         # Update coordinator state
         await self.coordinator.async_update_state()
     
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn off all lights in the group."""
+        # Save brightness state before turning off
+        self.coordinator.save_brightness_before_off()
+        
         if self.coordinator.entities:
             await self.hass.services.async_call(
                 "light", "turn_off", {"entity_id": self.coordinator.entities}, blocking=True

@@ -110,25 +110,19 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
         
         # Add hue offset section if there are colorable entities
         if hue_offset_schema:
+            # Add separator and then color offset fields
+            schema_dict[vol.Optional("hue_offsets_separator")] = selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[],
+                    disabled=True,
+                )
+            )
             schema_dict.update(hue_offset_schema)
         
         schema = vol.Schema(schema_dict)
         
-        # Create concise description for the options form
-        description_placeholders = {}
-        if colorable_entities:
-            colorable_count = len(colorable_entities)
-            non_colorable_count = len(entities) - colorable_count
-            if non_colorable_count > 0:
-                description_placeholders["info"] = f"{colorable_count} color lights, {non_colorable_count} brightness-only"
-            else:
-                description_placeholders["info"] = f"All {colorable_count} lights support color"
-        else:
-            description_placeholders["info"] = "No colorable lights found"
-        
         return self.async_show_form(
             step_id="options", 
             data_schema=schema, 
-            errors=errors,
-            description_placeholders=description_placeholders
+            errors=errors
         )

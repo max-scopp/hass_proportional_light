@@ -14,12 +14,14 @@
 		"step": {
 			"options": {
 				"title": "⚙️ Configure Proportional Light",
-				"description": "Choose lights and set hue offsets to add personality. {info}",
+				"description": "Choose lights for this group.",
 				"data": {
-					"entities": "🔗 Light Selection"
+					"entities": "🔗 Light Selection",
+					"hue_offsets_separator": "🎨 Color Offsets — Reopening this page will show settings for newly added/removed lights"
 				},
 				"data_description": {
-					"entities": "Choose which lights to include in this proportional group"
+					"entities": "Choose which lights to include in this proportional group",
+					"hue_offsets_separator": ""
 				}
 			}
 		}

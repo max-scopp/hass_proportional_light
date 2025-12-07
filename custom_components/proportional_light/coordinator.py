@@ -18,6 +18,7 @@ from .utils import (
     calculate_average_color,
     calculate_supported_features,
     calculate_proportional_brightness,
+    apply_hue_offset_to_color,
 )
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -53,9 +54,13 @@ class ProportionalLightCoordinator:
         self._group_target_color: tuple[float, float] | None = None
         self._group_target_temp_kelvin: int | None = None
         self._last_command_was_color: bool = False  # Track if last command was color vs temp
+        self._has_external_color_change: bool = False  # Track if last change was external
         
         # Brightness proportions for stable scaling
         self._brightness_proportions: dict[str, float] = {}
+        
+        # Store brightness before turning off to restore when turning back on
+        self._last_brightness_before_off: int | None = None
     
     @property
     def entities(self) -> list[str]:
@@ -73,6 +78,11 @@ class ProportionalLightCoordinator:
         return self._brightness_proportions
     
     @property
+    def last_brightness_before_off(self) -> int | None:
+        """Return the last brightness before turning off."""
+        return self._last_brightness_before_off
+    
+    @property
     def is_on(self) -> bool:
         """Return if the group is on."""
         return self._is_on
@@ -85,9 +95,10 @@ class ProportionalLightCoordinator:
     @property
     def hs_color(self) -> tuple[float, float] | None:
         """Return the HS color for the group UI."""
-        # Show group target color if we have one and last command was color
-        if self._group_target_color and self._last_command_was_color:
-            return self._group_target_color
+        # Show group target color if we have one and last command was color (and not external change)
+        if self._group_target_color and self._last_command_was_color and not self._has_external_color_change:
+            # Apply the average hue offset when displaying the user-set color
+            return apply_hue_offset_to_color(self._group_target_color, self._hue_offsets)
         # Otherwise show averaged color from lights
         return self._hs_color
     
@@ -243,6 +254,22 @@ class ProportionalLightCoordinator:
                 calculate_average_color(on_states, self._hue_offsets)
             )
             
+            # Detect external color changes: if a color was user-set and now the averaged color differs,
+            # it means lights changed externally (user changed colors outside proportional light)
+            if self._group_target_color and self._last_command_was_color:
+                # Compare if the averaged color differs significantly from the target
+                if self._hs_color and self._group_target_color:
+                    h_diff = abs(self._hs_color[0] - self._group_target_color[0])
+                    s_diff = abs(self._hs_color[1] - self._group_target_color[1])
+                    # Account for hue wrapping (e.g., 350° vs 10° are close)
+                    if h_diff > 180:
+                        h_diff = 360 - h_diff
+                    
+                    # If difference is significant (more than 10% saturation or 15° hue), mark as external change
+                    if h_diff > 15 or s_diff > 10:
+                        _LOGGER.debug(f"Detected external color change: target={self._group_target_color}, actual={self._hs_color}, diff=(h={h_diff:.1f}, s={s_diff:.1f})")
+                        self._has_external_color_change = True
+            
             _LOGGER.debug(f"Coordinator color updated:")
             _LOGGER.debug(f"  HS color: {old_hs_color} -> {self._hs_color}")
             _LOGGER.debug(f"  Color temp: {old_color_temp} -> {self._color_temp_kelvin}")
@@ -290,12 +317,14 @@ class ProportionalLightCoordinator:
         self._group_target_color = None
         self._group_target_temp_kelvin = None
         self._last_command_was_color = False
+        self._has_external_color_change = False
     
     def set_group_target_color(self, hs_color: tuple[float, float] | None) -> None:
         """Set the group target color (what user commanded, before offsets)."""
         self._group_target_color = hs_color
         self._group_target_temp_kelvin = None
         self._last_command_was_color = True
+        self._has_external_color_change = False  # Reset external change flag on user command
         _LOGGER.debug(f"Group target color set to: {hs_color}")
         
         # Schedule clearing targets after a delay to distinguish our commands from external changes
@@ -306,6 +335,7 @@ class ProportionalLightCoordinator:
         self._group_target_temp_kelvin = temp_kelvin
         self._group_target_color = None
         self._last_command_was_color = False
+        self._has_external_color_change = False  # Reset external change flag on user command
         _LOGGER.debug(f"Group target temp set to: {temp_kelvin}K")
         
         # Schedule clearing targets after a delay
@@ -315,7 +345,19 @@ class ProportionalLightCoordinator:
         """Clear group targets when lights change externally."""
         self._group_target_color = None
         self._group_target_temp_kelvin = None
+        self._has_external_color_change = True
         _LOGGER.debug("Group target colors cleared - showing averaged colors")
+    
+    def save_brightness_before_off(self) -> None:
+        """Save current brightness before turning off the group."""
+        if self._brightness is not None:
+            self._last_brightness_before_off = self._brightness
+            _LOGGER.debug(f"Saved brightness before off: {self._last_brightness_before_off}")
+    
+    def clear_brightness_before_off(self) -> None:
+        """Clear the saved brightness state."""
+        self._last_brightness_before_off = None
+        _LOGGER.debug("Cleared saved brightness before off")
     
     async def _delayed_clear_targets(self) -> None:
         """Clear group targets after a delay, allowing our commands to settle."""
