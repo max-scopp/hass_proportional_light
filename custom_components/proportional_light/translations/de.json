@@ -13,18 +13,18 @@
 	"options": {
 		"step": {
 			"lights": {
-				"title": "🔗 Lichtauswahl",
+				"title": "Welche Lichter sollen gesteuert werden?",
 				"description": "{note}",
 				"data": {
-					"entities": "Lichter"
+					"entities": "Lichter auswählen"
 				}
 			},
 			"proportions": {
-				"title": "📊 Helligkeitsverhältnisse",
+				"title": "Wie sollen Helligkeitsverhältnisse zurückgesetzt werden?",
 				"description": "{info}",
 				"data": {
 					"proportion_reset_mode": "Rücksetzmodus",
-					"proportion_reset_timeout": "Timeout (Sekunden)"
+					"proportion_reset_timeout": "Nach X Sekunden zurücksetzen"
 				},
 				"data_description": {
 					"proportion_reset_mode": "Nie: Verhältnisse immer beibehalten | Beim Ausschalten: beim Ausschalten zurücksetzen | Bei spezifischer Helligkeit: beim Einschalten mit expliziter Helligkeit zurücksetzen (z.B. Ambient Light) | Bei beiden: Kombination",
@@ -32,7 +32,7 @@
 				}
 			},
 			"colors": {
-				"title": "🎨 Farbton-Offsets",
+				"title": "Geben Sie Ihren Lichtern Persönlichkeit",
 				"description": "{info}",
 				"data": {}
 			}

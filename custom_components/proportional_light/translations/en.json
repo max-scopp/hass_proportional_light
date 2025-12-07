@@ -13,18 +13,18 @@
 	"options": {
 		"step": {
 			"lights": {
-				"title": "🔗 Light Selection",
+				"title": "Which lights to control?",
 				"description": "{note}",
 				"data": {
-					"entities": "Lights"
+					"entities": "Select Lights"
 				}
 			},
 			"proportions": {
-				"title": "📊 Brightness Proportions",
+				"title": "How should proportions reset?",
 				"description": "{info}",
 				"data": {
-					"proportion_reset_mode": "Reset mode",
-					"proportion_reset_timeout": "Timeout (seconds)"
+					"proportion_reset_mode": "Reset behavior",
+					"proportion_reset_timeout": "Reset after (seconds)"
 				},
 				"data_description": {
 					"proportion_reset_mode": "Never: keep proportions always | On turn off: reset when turned off | On specific brightness: reset when turned on with explicit brightness (e.g., Ambient Light) | On both: combination",
@@ -32,7 +32,7 @@
 				}
 			},
 			"colors": {
-				"title": "🎨 Color Offsets",
+				"title": "Add personality to your lights",
 				"description": "{info}",
 				"data": {}
 			}
