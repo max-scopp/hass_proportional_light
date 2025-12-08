@@ -269,17 +269,18 @@ class ProportionalLightCoordinator:
             self._brightness = calculate_group_brightness(on_states, self._brightness_proportions)
             _LOGGER.debug(f"Coordinator brightness updated: {old_brightness} -> {self._brightness}")
             
-            # Update brightness proportions based on current state
+            # Update brightness proportions based on current state ONLY if already initialized
             # This captures the natural proportions when lights change externally
-            if self._brightness and self._brightness > 0:
+            # BUT: Don't initialize proportions from current state - that would override default proportions
+            if self._brightness_proportions and self._brightness and self._brightness > 0:
                 current_proportions = {}
                 for s in on_states:
                     brightness = s.attributes.get(ATTR_BRIGHTNESS, 255)
                     proportion = brightness / self._brightness
                     current_proportions[s.entity_id] = proportion
                 
-                # Only update if proportions have meaningfully changed or are uninitialized
-                if not self._brightness_proportions or any(
+                # Only update if proportions have meaningfully changed
+                if any(
                     abs(current_proportions.get(entity_id, 0) - self._brightness_proportions.get(entity_id, 0)) > 0.05
                     for entity_id in current_proportions
                 ):
