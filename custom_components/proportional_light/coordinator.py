@@ -10,7 +10,14 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_ON
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode
 
-from .const import LOGGER_NAME, CONF_ENTITIES, CONF_HUE_OFFSETS
+from .const import (
+    LOGGER_NAME,
+    CONF_ENTITIES,
+    CONF_HUE_OFFSETS,
+    CONF_ENTITY_PROPS,
+    CONF_SELECTOR_TYPE,
+    CONF_SELECTOR_VALUE,
+)
 from .config_flow import (
     CONF_PROPORTION_RESET,
     CONF_RESET_TIMEOUT,
@@ -20,6 +27,7 @@ from .config_flow import (
     PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
     PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
 )
+from .entity_resolver import SelectorConfig, resolve_selector, subscribe_selector_changes
 from .utils import (
     filter_valid_states,
     get_on_states,
@@ -40,22 +48,48 @@ class ProportionalLightCoordinator:
         """Initialize the coordinator."""
         self.hass = hass
         self.entry = entry
-        self._entities: list[str] = entry.data.get(CONF_ENTITIES, [])
-        self._hue_offsets: dict[str, float] = entry.data.get(CONF_HUE_OFFSETS, {})
+
+        # Build selector config — supports both the new selector model and the
+        # legacy flat 'entities' list so existing config entries keep working.
+        self._selector_config: SelectorConfig = SelectorConfig.from_entry_data(entry.data)
+
+        # Resolved entity list — populated in async_setup and refreshed whenever
+        # the underlying area/device/entity registry changes.
+        self._entities: list[str] = []
+
+        # Per-entity props — new unified key, falling back to legacy separate dicts
+        entity_props: dict[str, dict] = entry.data.get(CONF_ENTITY_PROPS, {})
+        self._hue_offsets: dict[str, float] = {
+            eid: props.get("hue_offset", 0.0)
+            for eid, props in entity_props.items()
+            if "hue_offset" in props
+        }
+        # Also merge legacy hue_offsets key for backward compat
+        for eid, offset in entry.data.get(CONF_HUE_OFFSETS, {}).items():
+            self._hue_offsets.setdefault(eid, offset)
+
+        self._default_proportions: dict[str, float] = {
+            eid: props.get("default_proportion", 0.0)
+            for eid, props in entity_props.items()
+            if "default_proportion" in props
+        }
+        # Merge legacy default_proportions key
+        for eid, prop in entry.data.get(CONF_DEFAULT_PROPORTIONS, {}).items():
+            self._default_proportions.setdefault(eid, prop)
+
         self._proportion_reset_mode: str = entry.data.get(CONF_PROPORTION_RESET, PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS)
         self._reset_timeout_seconds: int = entry.data.get(CONF_RESET_TIMEOUT, 28800)
-        self._default_proportions: dict[str, float] = entry.data.get(CONF_DEFAULT_PROPORTIONS, {})
-        
-        _LOGGER.debug(f"Coordinator initialized with entities: {self._entities}")
-        _LOGGER.debug(f"Coordinator initialized with hue_offsets: {self._hue_offsets}")
-        _LOGGER.debug(f"Coordinator proportion reset mode: {self._proportion_reset_mode}")
-        _LOGGER.debug(f"Coordinator reset timeout: {self._reset_timeout_seconds}s")
-        _LOGGER.debug(f"Coordinator default proportions: {self._default_proportions}")
-        
+
+        _LOGGER.debug("Coordinator initialised with selector: %s=%s", self._selector_config.selector_type, self._selector_config.selector_value)
+        _LOGGER.debug("hue_offsets: %s", self._hue_offsets)
+        _LOGGER.debug("proportion reset mode: %s, timeout: %ss", self._proportion_reset_mode, self._reset_timeout_seconds)
+
         self._update_callbacks: list[Callable[[], None]] = []
         self._unsub_update_listener = None
         self._unsub_state_listener = None
-        
+        # Unsubscribe callable for entity/area/device registry watching
+        self._unsub_selector_listener: Callable[[], None] | None = None
+
         # Current calculated state
         self._is_on: bool = False
         self._brightness: int | None = None
@@ -165,26 +199,40 @@ class ProportionalLightCoordinator:
     
     async def async_setup(self) -> None:
         """Setup the coordinator."""
-        # Track state changes for all member entities
+        # Resolve the selector to a concrete entity list
+        self._entities = resolve_selector(self.hass, self._selector_config)
+        _LOGGER.debug("Resolved entities: %s", self._entities)
+
+        # Watch for registry changes that may alter the resolved entity list
+        # (e.g. a new light is added to the tracked area)
+        self._unsub_selector_listener = subscribe_selector_changes(
+            self.hass,
+            self._selector_config,
+            self._on_selector_changed,
+        )
+
+        # Track state changes for all resolved member entities
         if self._entities:
             self._unsub_state_listener = async_track_state_change_event(
                 self.hass, self._entities, self._state_listener
             )
-        
+
         # Listen for config entry updates
         self._unsub_update_listener = self.entry.add_update_listener(
             self._config_entry_updated
         )
-        
+
         # Perform initial update
         await self.async_update_state()
-    
+
     async def async_unload(self) -> None:
         """Unload the coordinator."""
         if self._unsub_state_listener:
             self._unsub_state_listener()
         if self._unsub_update_listener:
             self._unsub_update_listener()
+        if self._unsub_selector_listener:
+            self._unsub_selector_listener()
         if self._unsub_timeout:
             self._unsub_timeout()
     
@@ -226,23 +274,39 @@ class ProportionalLightCoordinator:
         self._notify_callbacks()
         _LOGGER.debug("_handle_state_change completed - callbacks notified")
     
+    @callback
+    def _on_selector_changed(self) -> None:
+        """Handle changes in the area/device registry that affect our entity list."""
+        _LOGGER.debug("Selector source changed — re-resolving entities")
+        self.hass.async_create_task(self._reload_entities())
+
+    async def _reload_entities(self) -> None:
+        """Re-resolve selector, restart state tracking, and notify callbacks."""
+        new_entities = resolve_selector(self.hass, self._selector_config)
+        if set(new_entities) == set(self._entities):
+            return  # Nothing changed
+
+        _LOGGER.debug("Entity list changed: %s -> %s", self._entities, new_entities)
+        self._entities = new_entities
+
+        # Restart state change listener with the new entity list
+        if self._unsub_state_listener:
+            self._unsub_state_listener()
+            self._unsub_state_listener = None
+        if self._entities:
+            self._unsub_state_listener = async_track_state_change_event(
+                self.hass, self._entities, self._state_listener
+            )
+
+        await self.async_update_state()
+        self._notify_callbacks()
+
     async def _config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Handle config entry updates."""
-        old_entities = set(self._entities)
-        new_entities = set(entry.data.get(CONF_ENTITIES, []))
-        
-        self._entities = entry.data.get(CONF_ENTITIES, [])
-        self._hue_offsets = entry.data.get(CONF_HUE_OFFSETS, {})
-        
-        # If entities changed, we need to re-setup state tracking
-        if old_entities != new_entities:
-            # Schedule a full reload to restart with new entity tracking
-            await self.hass.config_entries.async_reload(entry.entry_id)
-        else:
-            # Just update state if only settings changed
-            await self.async_update_state()
-            self._notify_callbacks()
-    
+        """Handle config entry updates — always trigger a full reload."""
+        _LOGGER.debug("Config entry updated — scheduling reload")
+        await self.hass.config_entries.async_reload(entry.entry_id)
+
+
     async def async_update_state(self) -> None:
         """Update the calculated state based on member entities."""
         _LOGGER.debug("Updating coordinator state")

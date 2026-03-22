@@ -1,14 +1,36 @@
+"""
+Config flow for Proportional Light.
+
+Intentionally minimal: the initial flow only asks for a name and a light
+selector.  All advanced options (per-light hue offsets, proportion reset
+behaviour, etc.) are managed via the custom frontend panel registered in
+__init__.py.
+"""
 from __future__ import annotations
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.const import CONF_ENTITIES
 from homeassistant.helpers import selector
 
-DOMAIN = "proportional_light"
+from .const import (
+    DOMAIN,
+    CONF_SELECTOR_TYPE,
+    CONF_SELECTOR_VALUE,
+    CONF_ENTITY_PROPS,
+    SELECTOR_TYPE_ENTITIES,
+    SELECTOR_TYPE_AREA,
+    SELECTOR_TYPE_DEVICE,
+)
+
+# ---------------------------------------------------------------------------
+# Proportion-reset constants (used by coordinator — defined here for
+# historical reasons and imported by coordinator.py)
+# ---------------------------------------------------------------------------
 
 CONF_PROPORTION_RESET = "proportion_reset_mode"
 CONF_RESET_TIMEOUT = "proportion_reset_timeout"
+# Legacy key kept for backward-compat reads
 CONF_DEFAULT_PROPORTIONS = "default_proportions"
 
 PROPORTION_RESET_NEVER = "never"
@@ -16,42 +38,68 @@ PROPORTION_RESET_ON_OFF = "on_off"
 PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS = "on_specific_brightness"
 PROPORTION_RESET_ON_OFF_AND_SPECIFIC = "on_off_and_specific"
 
-def _is_colorable_entity(hass, entity_id: str) -> bool:
-    """Check if an entity supports color (RGB/HS modes)."""
-    state = hass.states.get(entity_id)
-    if not state:
-        return False
-    
-    supported_modes = state.attributes.get("supported_color_modes", [])
-    # Check if entity supports any color modes that allow RGB/HS colors
-    colorable_modes = {"hs", "xy", "rgb", "rgbw", "rgbww"}
-    return any(mode in supported_modes for mode in colorable_modes)
-
 
 class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """
+    Initial setup wizard.
+
+    Asks for a group name and how to select the member lights.
+    Everything else is configured via the custom frontend panel.
+    """
+
     VERSION = 1
 
-    async def async_step_user(self, user_input=None):
-        errors = {}
-        if user_input is not None:
-            return self.async_create_entry(
-                title="Proportional Light",
-                data={
-                    "entities": user_input[CONF_ENTITIES],
-                    "hue_offsets": {},
-                    CONF_PROPORTION_RESET: PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
-                    CONF_RESET_TIMEOUT: 28800,  # 8 hours in seconds
-                },
-            )
+    async def async_step_user(self, user_input: dict | None = None):
+        errors: dict[str, str] = {}
 
-        schema = vol.Schema({
-            vol.Required(CONF_ENTITIES): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="light", multiple=True
+        if user_input is not None:
+            name = user_input.get("name", "").strip()
+            if not name:
+                errors["name"] = "name_required"
+            else:
+                selector_type = user_input.get(CONF_SELECTOR_TYPE, SELECTOR_TYPE_ENTITIES)
+                selector_value = user_input.get(CONF_SELECTOR_VALUE, [])
+
+                return self.async_create_entry(
+                    title=name,
+                    data={
+                        "name": name,
+                        CONF_SELECTOR_TYPE: selector_type,
+                        CONF_SELECTOR_VALUE: selector_value,
+                        CONF_ENTITY_PROPS: {},
+                        CONF_PROPORTION_RESET: PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+                        CONF_RESET_TIMEOUT: 28800,
+                    },
                 )
-            ),
-        })
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+        schema = vol.Schema(
+            {
+                vol.Required("name", default="My Lights"): selector.TextSelector(),
+                vol.Required(CONF_SELECTOR_TYPE, default=SELECTOR_TYPE_ENTITIES): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=[
+                            selector.SelectOptionDict(value=SELECTOR_TYPE_ENTITIES, label="Specific lights"),
+                            selector.SelectOptionDict(value=SELECTOR_TYPE_AREA, label="Area"),
+                            selector.SelectOptionDict(value=SELECTOR_TYPE_DEVICE, label="Device"),
+                        ]
+                    )
+                ),
+                # The value field is generic; the panel provides the better UX
+                # for area/device pickers.  Here we default to an entity selector.
+                vol.Optional(CONF_SELECTOR_VALUE): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="light", multiple=True)
+                ),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "panel_note": "Advanced options (per-light settings, proportion reset) are available in the Proportional Light panel."
+            },
+        )
 
     @staticmethod
     @callback
@@ -59,189 +107,27 @@ class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ProportionalLightOptionsFlow(config_entry)
 
 class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
+class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
+    """
+    Options flow.
+
+    A minimal step that tells the user to use the sidebar panel for advanced
+    settings.  Selecting "Save" from this dialog won't change any options —
+    the real UI lives at /proportional-light in the sidebar.
+    """
+
     def __init__(self, config_entry):
         super().__init__()
         self._config_entry = config_entry
 
-    async def async_step_init(self, user_input=None):
-        return await self.async_step_lights(user_input)
-
-    async def async_step_lights(self, user_input=None):
-        """Step 1: Configure lights"""
-        errors = {}
-        entities = self._config_entry.data.get("entities", [])
-
+    async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
-            # Store selected entities and move to next step
-            self._entities = user_input[CONF_ENTITIES]
-            return await self.async_step_proportions()
-
-        schema = vol.Schema({
-            vol.Required(CONF_ENTITIES, default=entities): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="light", multiple=True
-                )
-            ),
-        })
-        
-        return self.async_show_form(
-            step_id="lights",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={"note": "Select the lights to include in this proportional group"}
-        )
-
-    async def async_step_proportions(self, user_input=None):
-        """Step 2: Configure proportion reset behavior"""
-        errors = {}
-        proportion_reset = self._config_entry.data.get(CONF_PROPORTION_RESET, PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS)
-        reset_timeout = self._config_entry.data.get(CONF_RESET_TIMEOUT, 28800)
-
-        if user_input is not None:
-            self._proportion_reset = user_input[CONF_PROPORTION_RESET]
-            self._reset_timeout = user_input[CONF_RESET_TIMEOUT]
-            return await self.async_step_colors()
-
-        schema = vol.Schema({
-            vol.Required(CONF_PROPORTION_RESET, default=proportion_reset): selector.SelectSelector(
-                selector.SelectSelectorConfig(
-                    options=[
-                        selector.SelectOptionDict(value=PROPORTION_RESET_NEVER, label="Never reset"),
-                        selector.SelectOptionDict(value=PROPORTION_RESET_ON_OFF, label="Reset on turn off"),
-                        selector.SelectOptionDict(value=PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS, label="Reset when turned on with specific brightness"),
-                        selector.SelectOptionDict(value=PROPORTION_RESET_ON_OFF_AND_SPECIFIC, label="Reset on both"),
-                    ]
-                )
-            ),
-            vol.Required(CONF_RESET_TIMEOUT, default=reset_timeout): selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0,
-                    max=86400,
-                    step=300,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="s"
-                )
-            ),
-        })
-        
-        return self.async_show_form(
-            step_id="proportions",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={
-                "info": "Control when brightness proportions are reset. See README for detailed explanations of each mode."
-            }
-        )
-
-    async def async_step_colors(self, user_input=None):
-        """Step 3: Configure hue offsets for colorable lights"""
-        errors = {}
-        hue_offsets = self._config_entry.data.get("hue_offsets", {})
-        
-        # Get colorable entities from the selected lights
-        colorable_entities = [entity_id for entity_id in self._entities if _is_colorable_entity(self.hass, entity_id)]
-
-        if user_input is not None:
-            # Extract hue offsets from user input
-            new_hue_offsets = {}
-            for key, value in user_input.items():
-                if key.startswith("hue_offset_"):
-                    entity_id = key.replace("hue_offset_", "")
-                    if _is_colorable_entity(self.hass, entity_id):
-                        new_hue_offsets[entity_id] = float(value)
-            
-            # Move to default proportions step
-            self._hue_offsets = new_hue_offsets
-            return await self.async_step_default_proportions()
-
-        # Build hue offset schema
-        hue_offset_schema = {}
-        for entity_id in colorable_entities:
-            state = self.hass.states.get(entity_id)
-            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
-            field_name = f"hue_offset_{entity_id}"
-            
-            hue_offset_schema[vol.Optional(field_name, default=hue_offsets.get(entity_id, 0.0))] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-180.0,
-                    max=180.0,
-                    step=1.0,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="°"
-                )
-            )
-
-        # If no colorable entities, skip this step
-        if not hue_offset_schema:
-            self._hue_offsets = {}
-            return await self.async_step_default_proportions()
-
-        schema = vol.Schema(hue_offset_schema)
-        
-        return self.async_show_form(
-            step_id="colors",
-            data_schema=schema,
-            errors=errors,
-            description_placeholders={
-                "info": "Optional: Add personality to your lights with per-light hue adjustments. Leave at 0° for no adjustment."
-            }
-        )
-
-    async def async_step_default_proportions(self, user_input=None):
-        """Step 4: Configure default brightness proportions (optional)"""
-        errors = {}
-        default_proportions = self._config_entry.data.get(CONF_DEFAULT_PROPORTIONS, {})
-
-        if user_input is not None:
-            # Extract default proportions from user input
-            new_default_proportions = {}
-            for key, value in user_input.items():
-                if key.startswith("default_proportion_"):
-                    entity_id = key.replace("default_proportion_", "")
-                    if entity_id in self._entities:
-                        # Store as percentage (0-100), will be normalized later
-                        new_default_proportions[entity_id] = float(value) / 100.0
-            
-            # Update the config entry data
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    "entities": self._entities,
-                    "hue_offsets": self._hue_offsets,
-                    CONF_PROPORTION_RESET: self._proportion_reset,
-                    CONF_RESET_TIMEOUT: self._reset_timeout,
-                    CONF_DEFAULT_PROPORTIONS: new_default_proportions,
-                }
-            )
             return self.async_create_entry(title="", data={})
 
-        # Build default proportions schema for all entities
-        default_proportion_schema = {}
-        for entity_id in self._entities:
-            state = self.hass.states.get(entity_id)
-            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
-            field_name = f"default_proportion_{entity_id}"
-            
-            # Get the current value (stored as decimal, display as percentage)
-            current_value = (default_proportions.get(entity_id, 0.0) * 100) if entity_id in default_proportions else 50
-            
-            default_proportion_schema[vol.Optional(field_name, default=current_value)] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=0.0,
-                    max=100.0,
-                    step=5.0,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="%"
-                )
-            )
-
-        schema = vol.Schema(default_proportion_schema)
-        
         return self.async_show_form(
-            step_id="default_proportions",
-            data_schema=schema,
-            errors=errors,
+            step_id="init",
+            data_schema=vol.Schema({}),
             description_placeholders={
-                "info": "Optional: Set default brightness proportions. When lights turn on with a requested brightness after proportions have reset, these proportions will be applied. Set equal percentages for all lights to turn them all on at the same brightness. Leave unchanged to use automatic proportions."
-            }
+                "panel_url": "/proportional-light",
+            },
         )

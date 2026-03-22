@@ -1,0 +1,19 @@
+{
+    "name": "proportional-light-frontend",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "vite build",
+        "dev": "vite build --watch",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "lit": "^3.2.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "^5.5.0",
+        "vite": "^5.4.0"
+    }
+}
