@@ -107,7 +107,6 @@ class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ProportionalLightOptionsFlow(config_entry)
 
 class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
-class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
     """
     Options flow.
 
