@@ -10,7 +10,24 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.const import STATE_ON
 from homeassistant.components.light import ATTR_BRIGHTNESS, ColorMode
 
-from .const import LOGGER_NAME, CONF_ENTITIES, CONF_HUE_OFFSETS
+from .const import (
+    LOGGER_NAME,
+    CONF_ENTITIES,
+    CONF_HUE_OFFSETS,
+    CONF_ENTITY_PROPS,
+    CONF_SELECTOR_TYPE,
+    CONF_SELECTOR_VALUE,
+)
+from .config_flow import (
+    CONF_PROPORTION_RESET,
+    CONF_RESET_TIMEOUT,
+    CONF_DEFAULT_PROPORTIONS,
+    PROPORTION_RESET_NEVER,
+    PROPORTION_RESET_ON_OFF,
+    PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+    PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+)
+from .entity_resolver import SelectorConfig, resolve_selector, subscribe_selector_changes
 from .utils import (
     filter_valid_states,
     get_on_states,
@@ -18,6 +35,7 @@ from .utils import (
     calculate_average_color,
     calculate_supported_features,
     calculate_proportional_brightness,
+    apply_hue_offset_to_color,
 )
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
@@ -30,14 +48,48 @@ class ProportionalLightCoordinator:
         """Initialize the coordinator."""
         self.hass = hass
         self.entry = entry
-        self._entities: list[str] = entry.data.get(CONF_ENTITIES, [])
-        self._hue_offsets: dict[str, float] = entry.data.get(CONF_HUE_OFFSETS, {})
-        _LOGGER.debug(f"Coordinator initialized with entities: {self._entities}")
-        _LOGGER.debug(f"Coordinator initialized with hue_offsets: {self._hue_offsets}")
+
+        # Build selector config — supports both the new selector model and the
+        # legacy flat 'entities' list so existing config entries keep working.
+        self._selector_config: SelectorConfig = SelectorConfig.from_entry_data(entry.data)
+
+        # Resolved entity list — populated in async_setup and refreshed whenever
+        # the underlying area/device/entity registry changes.
+        self._entities: list[str] = []
+
+        # Per-entity props — new unified key, falling back to legacy separate dicts
+        entity_props: dict[str, dict] = entry.data.get(CONF_ENTITY_PROPS, {})
+        self._hue_offsets: dict[str, float] = {
+            eid: props.get("hue_offset", 0.0)
+            for eid, props in entity_props.items()
+            if "hue_offset" in props
+        }
+        # Also merge legacy hue_offsets key for backward compat
+        for eid, offset in entry.data.get(CONF_HUE_OFFSETS, {}).items():
+            self._hue_offsets.setdefault(eid, offset)
+
+        self._default_proportions: dict[str, float] = {
+            eid: props.get("default_proportion", 0.0)
+            for eid, props in entity_props.items()
+            if "default_proportion" in props
+        }
+        # Merge legacy default_proportions key
+        for eid, prop in entry.data.get(CONF_DEFAULT_PROPORTIONS, {}).items():
+            self._default_proportions.setdefault(eid, prop)
+
+        self._proportion_reset_mode: str = entry.data.get(CONF_PROPORTION_RESET, PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS)
+        self._reset_timeout_seconds: int = entry.data.get(CONF_RESET_TIMEOUT, 28800)
+
+        _LOGGER.debug("Coordinator initialised with selector: %s=%s", self._selector_config.selector_type, self._selector_config.selector_value)
+        _LOGGER.debug("hue_offsets: %s", self._hue_offsets)
+        _LOGGER.debug("proportion reset mode: %s, timeout: %ss", self._proportion_reset_mode, self._reset_timeout_seconds)
+
         self._update_callbacks: list[Callable[[], None]] = []
         self._unsub_update_listener = None
         self._unsub_state_listener = None
-        
+        # Unsubscribe callable for entity/area/device registry watching
+        self._unsub_selector_listener: Callable[[], None] | None = None
+
         # Current calculated state
         self._is_on: bool = False
         self._brightness: int | None = None
@@ -53,9 +105,17 @@ class ProportionalLightCoordinator:
         self._group_target_color: tuple[float, float] | None = None
         self._group_target_temp_kelvin: int | None = None
         self._last_command_was_color: bool = False  # Track if last command was color vs temp
+        self._has_external_color_change: bool = False  # Track if last change was external
         
         # Brightness proportions for stable scaling
         self._brightness_proportions: dict[str, float] = {}
+        
+        # Store brightness before turning off to restore when turning back on
+        self._last_brightness_before_off: int | None = None
+        
+        # Timeout tracking for automatic proportion reset
+        self._last_turn_off_time: float | None = None
+        self._unsub_timeout = None
     
     @property
     def entities(self) -> list[str]:
@@ -73,6 +133,26 @@ class ProportionalLightCoordinator:
         return self._brightness_proportions
     
     @property
+    def last_brightness_before_off(self) -> int | None:
+        """Return the last brightness before turning off."""
+        return self._last_brightness_before_off
+    
+    @property
+    def proportion_reset_mode(self) -> str:
+        """Return the proportion reset mode."""
+        return self._proportion_reset_mode
+    
+    @property
+    def reset_timeout_seconds(self) -> int:
+        """Return the reset timeout in seconds."""
+        return self._reset_timeout_seconds
+    
+    @property
+    def default_proportions(self) -> dict[str, float]:
+        """Return the default proportions dictionary."""
+        return self._default_proportions
+    
+    @property
     def is_on(self) -> bool:
         """Return if the group is on."""
         return self._is_on
@@ -85,8 +165,10 @@ class ProportionalLightCoordinator:
     @property
     def hs_color(self) -> tuple[float, float] | None:
         """Return the HS color for the group UI."""
-        # Show group target color if we have one and last command was color
-        if self._group_target_color and self._last_command_was_color:
+        # Show group target color if we have one and last command was color (and not external change)
+        if self._group_target_color and self._last_command_was_color and not self._has_external_color_change:
+            # Return the user-requested color WITHOUT offsets
+            # Offsets are only applied to individual lights, not displayed in the UI
             return self._group_target_color
         # Otherwise show averaged color from lights
         return self._hs_color
@@ -117,26 +199,42 @@ class ProportionalLightCoordinator:
     
     async def async_setup(self) -> None:
         """Setup the coordinator."""
-        # Track state changes for all member entities
+        # Resolve the selector to a concrete entity list
+        self._entities = resolve_selector(self.hass, self._selector_config)
+        _LOGGER.debug("Resolved entities: %s", self._entities)
+
+        # Watch for registry changes that may alter the resolved entity list
+        # (e.g. a new light is added to the tracked area)
+        self._unsub_selector_listener = subscribe_selector_changes(
+            self.hass,
+            self._selector_config,
+            self._on_selector_changed,
+        )
+
+        # Track state changes for all resolved member entities
         if self._entities:
             self._unsub_state_listener = async_track_state_change_event(
                 self.hass, self._entities, self._state_listener
             )
-        
+
         # Listen for config entry updates
         self._unsub_update_listener = self.entry.add_update_listener(
             self._config_entry_updated
         )
-        
+
         # Perform initial update
         await self.async_update_state()
-    
+
     async def async_unload(self) -> None:
         """Unload the coordinator."""
         if self._unsub_state_listener:
             self._unsub_state_listener()
         if self._unsub_update_listener:
             self._unsub_update_listener()
+        if self._unsub_selector_listener:
+            self._unsub_selector_listener()
+        if self._unsub_timeout:
+            self._unsub_timeout()
     
     def add_update_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be called when state updates."""
@@ -176,23 +274,39 @@ class ProportionalLightCoordinator:
         self._notify_callbacks()
         _LOGGER.debug("_handle_state_change completed - callbacks notified")
     
+    @callback
+    def _on_selector_changed(self) -> None:
+        """Handle changes in the area/device registry that affect our entity list."""
+        _LOGGER.debug("Selector source changed — re-resolving entities")
+        self.hass.async_create_task(self._reload_entities())
+
+    async def _reload_entities(self) -> None:
+        """Re-resolve selector, restart state tracking, and notify callbacks."""
+        new_entities = resolve_selector(self.hass, self._selector_config)
+        if set(new_entities) == set(self._entities):
+            return  # Nothing changed
+
+        _LOGGER.debug("Entity list changed: %s -> %s", self._entities, new_entities)
+        self._entities = new_entities
+
+        # Restart state change listener with the new entity list
+        if self._unsub_state_listener:
+            self._unsub_state_listener()
+            self._unsub_state_listener = None
+        if self._entities:
+            self._unsub_state_listener = async_track_state_change_event(
+                self.hass, self._entities, self._state_listener
+            )
+
+        await self.async_update_state()
+        self._notify_callbacks()
+
     async def _config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Handle config entry updates."""
-        old_entities = set(self._entities)
-        new_entities = set(entry.data.get(CONF_ENTITIES, []))
-        
-        self._entities = entry.data.get(CONF_ENTITIES, [])
-        self._hue_offsets = entry.data.get(CONF_HUE_OFFSETS, {})
-        
-        # If entities changed, we need to re-setup state tracking
-        if old_entities != new_entities:
-            # Schedule a full reload to restart with new entity tracking
-            await self.hass.config_entries.async_reload(entry.entry_id)
-        else:
-            # Just update state if only settings changed
-            await self.async_update_state()
-            self._notify_callbacks()
-    
+        """Handle config entry updates — always trigger a full reload."""
+        _LOGGER.debug("Config entry updated — scheduling reload")
+        await self.hass.config_entries.async_reload(entry.entry_id)
+
+
     async def async_update_state(self) -> None:
         """Update the calculated state based on member entities."""
         _LOGGER.debug("Updating coordinator state")
@@ -219,17 +333,18 @@ class ProportionalLightCoordinator:
             self._brightness = calculate_group_brightness(on_states, self._brightness_proportions)
             _LOGGER.debug(f"Coordinator brightness updated: {old_brightness} -> {self._brightness}")
             
-            # Update brightness proportions based on current state
+            # Update brightness proportions based on current state ONLY if already initialized
             # This captures the natural proportions when lights change externally
-            if self._brightness and self._brightness > 0:
+            # BUT: Don't initialize proportions from current state - that would override default proportions
+            if self._brightness_proportions and self._brightness and self._brightness > 0:
                 current_proportions = {}
                 for s in on_states:
                     brightness = s.attributes.get(ATTR_BRIGHTNESS, 255)
                     proportion = brightness / self._brightness
                     current_proportions[s.entity_id] = proportion
                 
-                # Only update if proportions have meaningfully changed or are uninitialized
-                if not self._brightness_proportions or any(
+                # Only update if proportions have meaningfully changed
+                if any(
                     abs(current_proportions.get(entity_id, 0) - self._brightness_proportions.get(entity_id, 0)) > 0.05
                     for entity_id in current_proportions
                 ):
@@ -242,6 +357,22 @@ class ProportionalLightCoordinator:
             self._hs_color, self._color_temp_kelvin = (
                 calculate_average_color(on_states, self._hue_offsets)
             )
+            
+            # Detect external color changes: if a color was user-set and now the averaged color differs,
+            # it means lights changed externally (user changed colors outside proportional light)
+            if self._group_target_color and self._last_command_was_color:
+                # Compare if the averaged color differs significantly from the target
+                if self._hs_color and self._group_target_color:
+                    h_diff = abs(self._hs_color[0] - self._group_target_color[0])
+                    s_diff = abs(self._hs_color[1] - self._group_target_color[1])
+                    # Account for hue wrapping (e.g., 350° vs 10° are close)
+                    if h_diff > 180:
+                        h_diff = 360 - h_diff
+                    
+                    # If difference is significant (more than 10% saturation or 15° hue), mark as external change
+                    if h_diff > 15 or s_diff > 10:
+                        _LOGGER.debug(f"Detected external color change: target={self._group_target_color}, actual={self._hs_color}, diff=(h={h_diff:.1f}, s={s_diff:.1f})")
+                        self._has_external_color_change = True
             
             _LOGGER.debug(f"Coordinator color updated:")
             _LOGGER.debug(f"  HS color: {old_hs_color} -> {self._hs_color}")
@@ -290,12 +421,14 @@ class ProportionalLightCoordinator:
         self._group_target_color = None
         self._group_target_temp_kelvin = None
         self._last_command_was_color = False
+        self._has_external_color_change = False
     
     def set_group_target_color(self, hs_color: tuple[float, float] | None) -> None:
         """Set the group target color (what user commanded, before offsets)."""
         self._group_target_color = hs_color
         self._group_target_temp_kelvin = None
         self._last_command_was_color = True
+        self._has_external_color_change = False  # Reset external change flag on user command
         _LOGGER.debug(f"Group target color set to: {hs_color}")
         
         # Schedule clearing targets after a delay to distinguish our commands from external changes
@@ -306,6 +439,7 @@ class ProportionalLightCoordinator:
         self._group_target_temp_kelvin = temp_kelvin
         self._group_target_color = None
         self._last_command_was_color = False
+        self._has_external_color_change = False  # Reset external change flag on user command
         _LOGGER.debug(f"Group target temp set to: {temp_kelvin}K")
         
         # Schedule clearing targets after a delay
@@ -315,7 +449,19 @@ class ProportionalLightCoordinator:
         """Clear group targets when lights change externally."""
         self._group_target_color = None
         self._group_target_temp_kelvin = None
+        self._has_external_color_change = True
         _LOGGER.debug("Group target colors cleared - showing averaged colors")
+    
+    def save_brightness_before_off(self) -> None:
+        """Save current brightness before turning off the group."""
+        if self._brightness is not None:
+            self._last_brightness_before_off = self._brightness
+            _LOGGER.debug(f"Saved brightness before off: {self._last_brightness_before_off}")
+    
+    def clear_brightness_before_off(self) -> None:
+        """Clear the saved brightness state."""
+        self._last_brightness_before_off = None
+        _LOGGER.debug("Cleared saved brightness before off")
     
     async def _delayed_clear_targets(self) -> None:
         """Clear group targets after a delay, allowing our commands to settle."""
@@ -327,6 +473,56 @@ class ProportionalLightCoordinator:
             _LOGGER.debug("Auto-clearing group targets after command delay")
             self.clear_group_targets()
             self._notify_callbacks()
+    
+    def reset_proportions(self) -> None:
+        """Reset brightness proportions."""
+        self._brightness_proportions = {}
+        _LOGGER.debug("Brightness proportions reset")
+    
+    def should_reset_on_turn_off(self) -> bool:
+        """Check if proportions should be reset on turn off."""
+        return self._proportion_reset_mode in (
+            PROPORTION_RESET_ON_OFF,
+            PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+        )
+    
+    def should_reset_on_specific_brightness(self) -> bool:
+        """Check if proportions should be reset when turned on with specific brightness."""
+        return self._proportion_reset_mode in (
+            PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+            PROPORTION_RESET_ON_OFF_AND_SPECIFIC,
+        )
+    
+    def schedule_timeout_reset(self) -> None:
+        """Schedule proportions to be reset after timeout."""
+        if self._reset_timeout_seconds <= 0:
+            return
+        
+        # Cancel any existing timeout
+        if self._unsub_timeout:
+            self._unsub_timeout()
+        
+        from homeassistant.helpers.event import async_call_later
+        
+        async def _handle_timeout(_now):
+            _LOGGER.debug(f"Proportion reset timeout triggered after {self._reset_timeout_seconds}s")
+            self.reset_proportions()
+            self._unsub_timeout = None
+            self._notify_callbacks()
+        
+        self._unsub_timeout = async_call_later(
+            self.hass,
+            self._reset_timeout_seconds,
+            _handle_timeout
+        )
+        _LOGGER.debug(f"Scheduled proportion reset after {self._reset_timeout_seconds}s")
+    
+    def cancel_timeout_reset(self) -> None:
+        """Cancel any scheduled proportion reset."""
+        if self._unsub_timeout:
+            self._unsub_timeout()
+            self._unsub_timeout = None
+            _LOGGER.debug("Cancelled scheduled proportion reset")
     
     def _notify_callbacks(self) -> None:
         """Notify all registered callbacks of state changes."""

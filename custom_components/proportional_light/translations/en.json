@@ -2,26 +2,25 @@
 	"config": {
 		"step": {
 			"user": {
-				"title": "Proportional Light Setup",
-				"description": "Select the lights you want to group together. Each light will maintain its individual brightness relationship while being controlled as one group.",
+				"title": "Create Proportional Light Group",
+				"description": "{note}",
 				"data": {
-					"entities": "Select Lights"
+					"name": "Group name"
 				}
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "This group is configured in the Proportional Light panel. Open the panel in the sidebar to set which lights to include and adjust options."
 		}
 	},
 	"options": {
 		"step": {
-			"options": {
-				"title": "⚙️ Configure Proportional Light",
-				"description": "Choose lights and set hue offsets to add personality. {info}",
-				"data": {
-					"entities": "🔗 Light Selection"
-				},
-				"data_description": {
-					"entities": "Choose which lights to include in this proportional group"
-				}
+			"init": {
+				"title": "Proportional Light Options"
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "Go to the Proportional Light panel (in the sidebar) to configure '{group}'."
 		}
 	},
 	"entity": {

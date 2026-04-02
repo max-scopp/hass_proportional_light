@@ -1,43 +1,75 @@
+"""
+Config flow for Proportional Light.
+
+Minimal entry point: just name. All other configuration (selector, entity props,
+proportion reset, etc.) is handled by the frontend panel.
+"""
 from __future__ import annotations
+
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.const import CONF_ENTITIES
 from homeassistant.helpers import selector
 
-DOMAIN = "proportional_light"
+from .const import (
+    DOMAIN,
+    CONF_SELECTOR_TYPE,
+    CONF_SELECTOR_VALUE,
+    CONF_ENTITY_PROPS,
+    SELECTOR_TYPE_ENTITIES,
+)
 
-def _is_colorable_entity(hass, entity_id: str) -> bool:
-    """Check if an entity supports color (RGB/HS modes)."""
-    state = hass.states.get(entity_id)
-    if not state:
-        return False
-    
-    supported_modes = state.attributes.get("supported_color_modes", [])
-    # Check if entity supports any color modes that allow RGB/HS colors
-    colorable_modes = {"hs", "xy", "rgb", "rgbw", "rgbww"}
-    return any(mode in supported_modes for mode in colorable_modes)
+# Proportion-reset constants (used by coordinator)
+CONF_PROPORTION_RESET = "proportion_reset_mode"
+CONF_RESET_TIMEOUT = "proportion_reset_timeout"
+CONF_DEFAULT_PROPORTIONS = "default_proportions"
+
+PROPORTION_RESET_NEVER = "never"
+PROPORTION_RESET_ON_OFF = "on_off"
+PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS = "on_specific_brightness"
+PROPORTION_RESET_ON_OFF_AND_SPECIFIC = "on_off_and_specific"
 
 
 class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Minimal setup: name only. Configure in panel."""
+
     VERSION = 1
 
-    async def async_step_user(self, user_input=None):
-        errors = {}
-        if user_input is not None:
-            return self.async_create_entry(
-                title="Proportional Light",
-                data={"entities": user_input[CONF_ENTITIES], "hue_offsets": {}},
-            )
+    async def async_step_user(self, user_input: dict | None = None):
+        """Single step: collect group name, create entry."""
+        errors: dict[str, str] = {}
 
-        schema = vol.Schema({
-            vol.Required(CONF_ENTITIES): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="light", multiple=True
+        if user_input is not None:
+            name = user_input.get("name", "").strip()
+            if not name:
+                errors["name"] = "name_required"
+            else:
+                return self.async_create_entry(
+                    title=name,
+                    data={
+                        "name": name,
+                        CONF_SELECTOR_TYPE: SELECTOR_TYPE_ENTITIES,
+                        CONF_SELECTOR_VALUE: [],
+                        CONF_ENTITY_PROPS: {},
+                        CONF_PROPORTION_RESET: PROPORTION_RESET_ON_SPECIFIC_BRIGHTNESS,
+                        CONF_RESET_TIMEOUT: 28800,
+                    },
                 )
-            ),
-        })
-        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+        schema = vol.Schema(
+            {
+                vol.Required("name"): selector.TextSelector(),
+            }
+        )
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=schema,
+            errors=errors,
+            description_placeholders={
+                "note": "After creating the group, open the Proportional Light panel in the sidebar to configure which lights to include and set options."
+            },
+        )
 
     @staticmethod
     @callback
@@ -45,90 +77,18 @@ class ProportionalLightConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return ProportionalLightOptionsFlow(config_entry)
 
 class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
+    """Options are managed in the panel."""
+
     def __init__(self, config_entry):
         super().__init__()
         self._config_entry = config_entry
 
-    async def async_step_init(self, user_input=None):
-        return await self.async_step_options(user_input)
-
-    async def async_step_options(self, user_input=None):
-        errors = {}
-        entities = self._config_entry.data.get("entities", [])
-        hue_offsets = self._config_entry.data.get("hue_offsets", {})
-
-        if user_input is not None:
-            # Extract hue offsets from user input - only for colorable entities
-            new_hue_offsets = {}
-            for key, value in user_input.items():
-                if key.startswith("hue_offset_"):
-                    entity_id = key.replace("hue_offset_", "")
-                    # Only save hue offset if entity is colorable
-                    if _is_colorable_entity(self.hass, entity_id):
-                        new_hue_offsets[entity_id] = float(value)
-            
-            # Update the config entry data directly
-            self.hass.config_entries.async_update_entry(
-                self._config_entry,
-                data={
-                    "entities": user_input[CONF_ENTITIES],
-                    "hue_offsets": new_hue_offsets,
-                }
-            )
-            return self.async_create_entry(title="", data={})
-
-        # Build hue offset schema dynamically based on selected entities
-        # Only show hue offset options for colorable entities
-        hue_offset_schema = {}
-        colorable_entities = [entity_id for entity_id in entities if _is_colorable_entity(self.hass, entity_id)]
-        
-        for entity_id in colorable_entities:
-            # Use a more user-friendly field name
-            state = self.hass.states.get(entity_id)
-            friendly_name = state.attributes.get("friendly_name", entity_id) if state else entity_id
-            field_name = f"hue_offset_{entity_id}"
-            
-            # Create a descriptive field with the friendly name and description
-            hue_offset_schema[vol.Optional(field_name, default=hue_offsets.get(entity_id, 0.0))] = selector.NumberSelector(
-                selector.NumberSelectorConfig(
-                    min=-180.0,
-                    max=180.0,
-                    step=1.0,
-                    mode=selector.NumberSelectorMode.BOX,
-                    unit_of_measurement="°"
-                )
-            )
-
-        # Create organized schema with sections
-        schema_dict = {
-            vol.Required(CONF_ENTITIES, default=entities): selector.EntitySelector(
-                selector.EntitySelectorConfig(
-                    domain="light", multiple=True
-                )
-            ),
-        }
-        
-        # Add hue offset section if there are colorable entities
-        if hue_offset_schema:
-            schema_dict.update(hue_offset_schema)
-        
-        schema = vol.Schema(schema_dict)
-        
-        # Create concise description for the options form
-        description_placeholders = {}
-        if colorable_entities:
-            colorable_count = len(colorable_entities)
-            non_colorable_count = len(entities) - colorable_count
-            if non_colorable_count > 0:
-                description_placeholders["info"] = f"{colorable_count} color lights, {non_colorable_count} brightness-only"
-            else:
-                description_placeholders["info"] = f"All {colorable_count} lights support color"
-        else:
-            description_placeholders["info"] = "No colorable lights found"
-        
-        return self.async_show_form(
-            step_id="options", 
-            data_schema=schema, 
-            errors=errors,
-            description_placeholders=description_placeholders
+    async def async_step_init(self, user_input: dict | None = None):
+        """Redirect to the Proportional Light panel in the sidebar."""
+        return self.async_abort(
+            reason="options_managed_in_panel",
+            description_placeholders={
+                "panel_url": "/proportional-light",
+                "group": self._config_entry.title,
+            },
         )

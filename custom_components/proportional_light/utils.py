@@ -23,6 +23,26 @@ from .const import LOGGER_NAME
 
 _LOGGER = logging.getLogger(LOGGER_NAME)
 
+def apply_hue_offset_to_color(color: tuple[float, float], hue_offsets: dict[str, float]) -> tuple[float, float]:
+    """Apply average hue offset to a color.
+    
+    When the user sets a color on the proportional light, we apply the average of all
+    individual hue offsets to the displayed color. This way, the group shows the user's
+    chosen color plus the average adjustment.
+    """
+    if not hue_offsets or not color:
+        return color
+    
+    # Calculate the average hue offset
+    if hue_offsets:
+        avg_offset = sum(hue_offsets.values()) / len(hue_offsets)
+    else:
+        avg_offset = 0
+    
+    h, s = color
+    offset_h = (h + avg_offset) % 360
+    return (offset_h, s)
+
 def calculate_group_brightness(on_states: list[State], stored_proportions: dict[str, float] | None = None) -> int | None:
     """Calculate group brightness as the highest brightness of any light.
     
@@ -77,19 +97,35 @@ def calculate_proportional_brightness(
                 proportions[entity_id] = brightness / max_current
                 
             new_brightnesses = {}
+            # Find which light has the highest proportion
+            max_proportion_entity = max(current_brightnesses.keys(), key=lambda e: current_brightnesses[e])
             for entity_id in entity_ids:
-                new_brightnesses[entity_id] = int(255 * proportions[entity_id])
-                if new_brightnesses[entity_id] < 1:
-                    new_brightnesses[entity_id] = 1
+                ideal = 255 * proportions[entity_id]
+                if entity_id == max_proportion_entity:
+                    # This light should reach 255
+                    new_brightnesses[entity_id] = 255
+                else:
+                    # Others use intelligent rounding
+                    new_brightnesses[entity_id] = max(1, int(ideal))
+                    if new_brightnesses[entity_id] < 1:
+                        new_brightnesses[entity_id] = 1
         else:
             # Use stored proportions, scale so highest proportion hits 255
             max_proportion = max(stored_proportions.get(eid, 1.0) for eid in entity_ids)
             proportions = {entity_id: stored_proportions.get(entity_id, 1.0) for entity_id in entity_ids}
+            
+            # Find entity with max proportion
+            max_proportion_entity = max(entity_ids, key=lambda e: proportions[e])
+            
             new_brightnesses = {}
             for entity_id in entity_ids:
-                new_brightnesses[entity_id] = int(255 * (proportions[entity_id] / max_proportion))
-                if new_brightnesses[entity_id] < 1:
-                    new_brightnesses[entity_id] = 1
+                ideal = 255 * (proportions[entity_id] / max_proportion)
+                if entity_id == max_proportion_entity:
+                    # This light should reach 255
+                    new_brightnesses[entity_id] = 255
+                else:
+                    # Others use intelligent rounding
+                    new_brightnesses[entity_id] = max(1, int(ideal))
                     
         return new_brightnesses, proportions
     
@@ -130,15 +166,34 @@ def calculate_proportional_brightness(
         _LOGGER.debug(f"Using stored proportions: {proportions}")
     
     # Calculate target brightness for each light based on stable proportions
+    # Use intelligent rounding to prevent drift while ensuring at least one light reaches target
     new_brightnesses = {}
+    ideal_brightnesses = {}
+    
     for entity_id in entity_ids:
         # Calculate ideal brightness based on target and proportion
         ideal_brightness = target_brightness * proportions[entity_id]
-        # Clamp to valid range
-        actual_brightness = max(1, min(255, int(ideal_brightness)))
-        new_brightnesses[entity_id] = actual_brightness
+        ideal_brightnesses[entity_id] = ideal_brightness
+        _LOGGER.debug(f"  {entity_id}: target={target_brightness} × {proportions[entity_id]:.3f} = {ideal_brightness:.1f}")
+    
+    # Find the light with the highest proportion - it should reach the target
+    max_proportion_entity = max(entity_ids, key=lambda e: proportions[e])
+    max_proportion_value = proportions[max_proportion_entity]
+    
+    # Assign brightnesses with intelligent rounding to prevent drift
+    for entity_id in entity_ids:
+        ideal = ideal_brightnesses[entity_id]
         
-        _LOGGER.debug(f"  {entity_id}: target={target_brightness} × {proportions[entity_id]:.3f} = {ideal_brightness:.1f} -> {actual_brightness}")
+        if entity_id == max_proportion_entity:
+            # The light with highest proportion should reach the target brightness
+            actual_brightness = max(1, min(255, int(round(ideal))))
+        else:
+            # For other lights, use proportional scaling with floor to preserve relationships
+            # But ensure minimum brightness is 1
+            actual_brightness = max(1, int(ideal))
+        
+        new_brightnesses[entity_id] = actual_brightness
+        _LOGGER.debug(f"  {entity_id}: ideal={ideal:.1f} -> actual={actual_brightness}")
     
     # Verify the result
     actual_avg = sum(new_brightnesses.values()) / len(new_brightnesses)
