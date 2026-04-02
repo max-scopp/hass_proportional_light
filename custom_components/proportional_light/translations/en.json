@@ -2,45 +2,25 @@
 	"config": {
 		"step": {
 			"user": {
-				"title": "Proportional Light Setup",
-				"description": "Select the lights you want to group together. Each light will maintain its individual brightness relationship while being controlled as one group.",
+				"title": "Create Proportional Light Group",
+				"description": "{note}",
 				"data": {
-					"entities": "Select Lights"
+					"name": "Group name"
 				}
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "This group is configured in the Proportional Light panel. Open the panel in the sidebar to set which lights to include and adjust options."
 		}
 	},
 	"options": {
 		"step": {
-			"lights": {
-				"title": "Which lights to control?",
-				"description": "{note}",
-				"data": {
-					"entities": "Select Lights"
-				}
-			},
-			"proportions": {
-				"title": "How should proportions reset?",
-				"description": "{info}",
-				"data": {
-					"proportion_reset_mode": "Reset behavior",
-					"proportion_reset_timeout": "Reset after (seconds)"
-				},
-				"data_description": {
-					"proportion_reset_mode": "Never: keep proportions always | On turn off: reset when turned off | On specific brightness: reset when turned on with explicit brightness (e.g., Ambient Light) | On both: combination",
-					"proportion_reset_timeout": "Auto-reset after this time when lights are off (0 = disabled)"
-				}
-			},
-			"colors": {
-				"title": "Add personality to your lights",
-				"description": "{info}",
-				"data": {}
-			},
-			"default_proportions": {
-				"title": "Set default brightness proportions",
-				"description": "{info}",
-				"data": {}
+			"init": {
+				"title": "Proportional Light Options"
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "Go to the Proportional Light panel (in the sidebar) to configure '{group}'."
 		}
 	},
 	"entity": {

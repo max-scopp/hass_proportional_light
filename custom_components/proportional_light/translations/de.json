@@ -2,45 +2,25 @@
 	"config": {
 		"step": {
 			"user": {
-				"title": "Proportionale Licht Einrichtung",
-				"description": "Wähle die Lichter aus, die du gruppieren möchtest. Jedes Licht behält seine individuelle Helligkeitsbeziehung bei, während es als eine Gruppe gesteuert wird.",
+				"title": "Proportionale Licht-Gruppe erstellen",
+				"description": "{note}",
 				"data": {
-					"entities": "Lichter auswählen"
+					"name": "Gruppennname"
 				}
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "Diese Gruppe wird im Proportional-Light-Panel konfiguriert. Öffnen Sie das Panel in der Seitenleiste, um zu wählen, welche Lichter einzubeziehen sind, und passen Sie die Optionen an."
 		}
 	},
 	"options": {
 		"step": {
-			"lights": {
-				"title": "Welche Lichter sollen gesteuert werden?",
-				"description": "{note}",
-				"data": {
-					"entities": "Lichter auswählen"
-				}
-			},
-			"proportions": {
-				"title": "Wie sollen Helligkeitsverhältnisse zurückgesetzt werden?",
-				"description": "{info}",
-				"data": {
-					"proportion_reset_mode": "Rücksetzmodus",
-					"proportion_reset_timeout": "Nach X Sekunden zurücksetzen"
-				},
-				"data_description": {
-					"proportion_reset_mode": "Nie: Verhältnisse immer beibehalten | Beim Ausschalten: beim Ausschalten zurücksetzen | Bei spezifischer Helligkeit: beim Einschalten mit expliziter Helligkeit zurücksetzen (z.B. Ambient Light) | Bei beiden: Kombination",
-					"proportion_reset_timeout": "Automatisch zurücksetzen nach dieser Zeit, wenn Lichter aus sind (0 = deaktiviert)"
-				}
-			},
-			"colors": {
-				"title": "Geben Sie Ihren Lichtern Persönlichkeit",
-				"description": "{info}",
-				"data": {}
-			},
-			"default_proportions": {
-				"title": "Standard-Helligkeitsverhältnisse einstellen",
-				"description": "{info}",
-				"data": {}
+			"init": {
+				"title": "Proportionale Licht-Optionen"
 			}
+		},
+		"abort": {
+			"options_managed_in_panel": "Öffnen Sie das Proportional-Light-Panel (in der Seitenleiste), um '{group}' zu konfigurieren."
 		}
 	},
 	"entity": {
