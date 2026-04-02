@@ -110,9 +110,8 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
     """
     Options flow.
 
-    A minimal step that tells the user to use the sidebar panel for advanced
-    settings.  Selecting "Save" from this dialog won't change any options —
-    the real UI lives at /proportional-light in the sidebar.
+    For MVP, displays current group info read-only. Full editing will be
+    available in the frontend panel once it's integrated.
     """
 
     def __init__(self, config_entry):
@@ -120,13 +119,54 @@ class ProportionalLightOptionsFlow(config_entries.OptionsFlow):
         self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None):
+        """Show current group configuration."""
+        data = self._config_entry.data
+        name = data.get("name", "Unnamed")
+        selector_type = data.get(CONF_SELECTOR_TYPE, "entities")
+        
+        # Build a human-readable description of what's in this group
+        if selector_type == "entities":
+            entity_list = data.get(CONF_SELECTOR_VALUE, [])
+            if isinstance(entity_list, list):
+                count = len(entity_list)
+                description = f"Selected {count} light(s)"
+            else:
+                description = "Selected entities"
+        elif selector_type == "area":
+            area_id = data.get(CONF_SELECTOR_VALUE, "—")
+            description = f"Area: {area_id}"
+        elif selector_type == "device":
+            device_id = data.get(CONF_SELECTOR_VALUE, "—")
+            description = f"Device: {device_id}"
+        else:
+            description = "Unknown selector type"
+
+        # Build a read-only display schema
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    "group_name",
+                    default=name,
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(disabled=True)
+                ),
+                vol.Optional(
+                    "group_info",
+                    default=f"Type: {selector_type} • {description}",
+                ): selector.TextSelector(
+                    selector.TextSelectorConfig(disabled=True)
+                ),
+            }
+        )
+
         if user_input is not None:
-            return self.async_create_entry(title="", data={})
+            # No-op: just acknowledge and close
+            return self.async_abort(reason="options_saved")
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema({}),
+            data_schema=schema,
             description_placeholders={
-                "panel_url": "/proportional-light",
+                "info": "Detailed per-light settings (hue offsets, proportions) will be available in the Proportional Light panel in the sidebar. To edit this group, delete and recreate it, or modify the group via YAML (if you prefer). Changes to entity registries (areas/devices) automatically apply."
             },
         )

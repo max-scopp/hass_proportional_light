@@ -15,6 +15,7 @@ export default defineConfig({
             // globally, so we include our own copy in the output.
         },
         target: "es2020",
-        minify: false, // keep readable during development; enable for production
+        minify: "terser",
     },
 });
+
